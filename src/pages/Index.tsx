@@ -20,7 +20,6 @@ const subscriptionPlans = [
 ];
 
 export default function Index() {
-  // --- AUTH AND DATABASE STATES ---
   const [user, setUser] = useState<any>(null);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
@@ -29,19 +28,17 @@ export default function Index() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  // --- UI STATES ---
   const [matches, setMatches] = useState<number[]>([]);
   const [likesCount, setLikesCount] = useState(0);
   const [requestsCount, setRequestsCount] = useState(0);
   const [activeTab, setActiveTab] = useState<'discover' | 'matches' | 'moments' | 'live' | 'pricing'>('discover');
 
-  // 1. Check Auth Session on Load
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       if (session?.user) {
         fetchProfiles();
-        fetchUserStats(session.user.id);
+        fetchUserStats();
       } else {
         setLoading(false);
       }
@@ -51,7 +48,7 @@ export default function Index() {
       setUser(session?.user ?? null);
       if (session?.user) {
         fetchProfiles();
-        fetchUserStats(session.user.id);
+        fetchUserStats();
       } else {
         setDbProfiles([]);
         setLoading(false);
@@ -61,19 +58,15 @@ export default function Index() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // 2. Fetch Profiles from Supabase (FlutterFlow compatible)
   const fetchProfiles = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('profile')
-        .select('*');
-      
+      const { data, error } = await supabase.from('profile').select('*');
       if (error) throw error;
 
       if (data) {
         const formatted: Profile[] = data.map((p: any) => ({
-          id: p.id,
+          id: p.id || Math.random().toString(),
           name: p.name || 'User',
           age: p.age || 22,
           location: p.city || 'India',
@@ -91,15 +84,13 @@ export default function Index() {
     }
   };
 
-  // 3. Fetch User Stats (Likes and Requests count)
-  const fetchUserStats = async (userId: string) => {
+  const fetchUserStats = async () => {
     const { count: likes } = await supabase.from('likes').select('*', { count: 'exact', head: true });
     const { count: reqs } = await supabase.from('message').select('*', { count: 'exact', head: true });
     if (likes) setLikesCount(likes);
     if (reqs) setRequestsCount(reqs);
   };
 
-  // 4. Handle Authentication Actions
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     if (authMode === 'signup') {
@@ -117,21 +108,16 @@ export default function Index() {
     setUser(null);
   };
 
-  // 5. Swipe Actions Connected to Supabase Tables
-  const currentProfile = dbProfiles[currentIndex];
-
   const nextProfile = () => {
-    if (currentIndex < dbProfiles.length - 1) {
-      setCurrentIndex(currentIndex + 1);
-    } else {
-      setCurrentIndex(0);
+    if (dbProfiles.length > 0) {
+      setCurrentIndex((prevIndex) => (prevIndex + 1) % dbProfiles.length);
     }
   };
 
   const handleLike = async () => {
-    if (!currentProfile || !user) return;
+    if (!dbProfiles[currentIndex] || !user) return;
     await supabase.from('likes').insert([
-      { id: Math.random().toString(), name: currentProfile.name }
+      { id: Math.random().toString(), name: dbProfiles[currentIndex].name }
     ]);
     setLikesCount(prev => prev + 1);
     nextProfile();
@@ -142,18 +128,17 @@ export default function Index() {
   };
 
   const handleRequest = async () => {
-    if (!currentProfile || !user) return;
+    if (!dbProfiles[currentIndex] || !user) return;
     await supabase.from('message').insert([
-      { id: Math.random().toString(), message_text: `Hi ${currentProfile.name}, I interested in your profile!` }
+      { id: Math.random().toString(), message_text: `Hi ${dbProfiles[currentIndex].name}, I am interested!` }
     ]);
     setRequestsCount(prev => prev + 1);
     nextProfile();
   };
 
-  // --- RENDER LOGIN SCREEN IF NOT AUTHENTICATED ---
   if (!user) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-red-50 via-white to-pink-50 flex flex-col justify-center items-center px-4">
+      <div className="min-h-screen bg-gradient-to-br from-red-50 via-white to-pink-50 flex flex-col justify-center items-center px-4 py-12">
         <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 border border-border">
           <div className="flex flex-col items-center mb-8">
             <div className="w-12 h-12 bg-gradient-to-r from-primary to-accent rounded-full flex items-center justify-center mb-3">
@@ -187,6 +172,7 @@ export default function Index() {
 
           <div className="mt-6 text-center text-sm">
             <button 
+              type="button"
               onClick={() => setAuthMode(authMode === 'signin' ? 'signup' : 'signin')}
               className="text-primary font-medium hover:underline"
             >
@@ -198,7 +184,6 @@ export default function Index() {
     );
   }
 
-  // --- RENDER LOADING STATE ---
   if (loading || dbProfiles.length === 0) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white text-foreground">
@@ -210,10 +195,10 @@ export default function Index() {
     );
   }
 
-  // --- MAIN APP RENDER ---
+  const currentProfile = dbProfiles[currentIndex];
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-red-50 via-white to-pink-50">
-      {/* Header */}
       <div className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-border shadow-sm">
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -224,8 +209,7 @@ export default function Index() {
           </div>
           <div className="flex items-center gap-4">
             <span className="text-sm text-muted-foreground hidden sm:inline">
-              <Lock className="w-4 h-4 inline mr-1" />
-              100% Verified Profiles
+              <Lock className="w-4 h-4 inline mr-1" /> 100% Verified Profiles
             </span>
             <button onClick={handleSignOut} className="p-2 hover:bg-muted rounded-full text-muted-foreground hover:text-foreground transition-smooth" title="Logout">
               <LogOut className="w-5 h-5" />
@@ -234,7 +218,6 @@ export default function Index() {
         </div>
       </div>
 
-      {/* Navigation Tabs */}
       <div className="sticky top-16 z-30 bg-white border-b border-border">
         <div className="max-w-6xl mx-auto px-4 flex gap-2 overflow-x-auto">
           {[
@@ -247,11 +230,7 @@ export default function Index() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`px-4 py-3 text-sm font-medium transition-smooth border-b-2 whitespace-nowrap ${
-                activeTab === tab.id
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground'
-              }`}
+              className={`px-4 py-3 text-sm font-medium transition-smooth border-b-2 whitespace-nowrap ${activeTab === tab.id ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
             >
               {tab.icon} {tab.label}
             </button>
@@ -259,7 +238,12 @@ export default function Index() {
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="max-w-6xl mx-auto px-4 py-8">
-        {/* Discover Tab */}
         {activeTab === 'discover' && (
+          <div className="grid md:grid-cols-3 gap-8">
+            <div className="md:col-span-2">
+              <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+                <div className="relative h-96 bg-muted overflow-hidden">
+                  <img src={currentProfile.image} alt={currentProfile.name} className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
+                  {currentProfile.verified && (
