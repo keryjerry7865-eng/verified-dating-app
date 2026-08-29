@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Heart, X, MessageCircle, Video, Share2, Lock, CheckCircle, LogOut } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 
@@ -12,12 +13,6 @@ interface Profile {
   interests: string[];
 }
 
-const subscriptionPlans = [
-  { duration: "3 Days", price: 29, period: "₹29" },
-  { duration: "1 Week", price: 49, period: "₹49" },
-  { duration: "1 Month", price: 99, period: "₹99" }
-];
-
 export default function Index() {
   const [user, setUser] = useState<any>(null);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
@@ -27,7 +22,6 @@ export default function Index() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  const [matches, setMatches] = useState<number[]>([]);
   const [likesCount, setLikesCount] = useState(0);
   const [requestsCount, setRequestsCount] = useState(0);
   const [activeTab, setActiveTab] = useState<'discover' | 'matches' | 'moments' | 'live' | 'pricing'>('discover');
@@ -129,12 +123,13 @@ export default function Index() {
   const handleRequest = async () => {
     if (!dbProfiles[currentIndex] || !user) return;
     await supabase.from('message').insert([
-      { id: Math.random().toString(), message_text: Hi ${dbProfiles[currentIndex].name}, I am interested! }
+      { id: Math.random().toString(), message_text: `Hi ${dbProfiles[currentIndex].name}, I am interested!` }
     ]);
     setRequestsCount(prev => prev + 1);
     nextProfile();
   };
-if (!user) {
+
+  if (!user) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-red-50 via-white to-pink-50 flex flex-col justify-center items-center px-4 py-12">
         <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 border border-border">
@@ -228,7 +223,7 @@ if (!user) {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={px-4 py-3 text-sm font-medium transition-smooth border-b-2 whitespace-nowrap ${activeTab === tab.id ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}}
+              className={`px-4 py-3 text-sm font-medium transition-smooth border-b-2 whitespace-nowrap ${activeTab === tab.id ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
             >
               {tab.icon} {tab.label}
             </button>
@@ -248,21 +243,21 @@ if (!user) {
                 <div className="p-6 space-y-4">
                   <div className="flex items-baseline gap-2">
                     <h2 className="text-3xl font-bold text-foreground">{currentProfile.name}</h2>
-                    <span className="text-xl text-muted-foreground">{currentProfile.age}</span>
-                  </div>
-                  <p className="text-sm text-muted-foreground flex items-center gap-1">📍 {currentProfile.location}</p>
-                  <p className="text-foreground leading-relaxed">{currentProfile.bio}</p>
+<span className="text-xl text-muted-foreground">{currentProfile.age}</span>
                 </div>
-                <div className="border-t border-border p-6 flex gap-4">
-                  <button onClick={handleReject} className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-muted text-foreground rounded-lg font-semibold transition-smooth hover:bg-muted/80 active:scale-95"><X className="w-5 h-5" /> Pass</button>
-                  <button onClick={handleRequest} className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-secondary text-secondary-foreground rounded-lg font-semibold transition-smooth hover:opacity-90 active:scale-95"><MessageCircle className="w-5 h-5" /> Request</button>
-                  <button onClick={handleLike} className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-primary to-accent text-primary-foreground rounded-lg font-semibold transition-smooth hover:shadow-lg active:scale-95"><Heart className="w-5 h-5 fill-current" /> Like</button>
-                </div>
+                <p className="text-sm text-muted-foreground flex items-center gap-1">📍 {currentProfile.location}</p>
+                <p className="text-foreground leading-relaxed">{currentProfile.bio}</p>
+              </div>
+              <div className="border-t border-border p-6 flex gap-4">
+                <button onClick={handleReject} className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-muted text-foreground rounded-lg font-semibold transition-smooth hover:bg-muted/80 active:scale-95"><X className="w-5 h-5" /> Pass</button>
+                <button onClick={handleRequest} className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-secondary text-secondary-foreground rounded-lg font-semibold transition-smooth hover:opacity-90 active:scale-95"><MessageCircle className="w-5 h-5" /> Request</button>
+                <button onClick={handleLike} className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-primary to-accent text-primary-foreground rounded-lg font-semibold transition-smooth hover:shadow-lg active:scale-95"><Heart className="w-5 h-5 fill-current" /> Like</button>
               </div>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
-  );
+  </div>
+);
 }
