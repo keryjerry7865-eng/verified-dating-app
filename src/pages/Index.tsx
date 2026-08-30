@@ -9,10 +9,33 @@ export default function Index() {
   const [likesCount, setLikesCount] = useState(40);
   const [isPremium, setIsPremium] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<any>(null);
+  const [walletBalance, setWalletBalance] = useState<number>(1200);
+  const [streamerWallet, setStreamerWallet] = useState<number>(0);
+  const [redeemedAmount, setRedeemedAmount] = useState<number>(0);
 
   // 2. मीडिया स्टेट्स
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
+
+  const giftCatalog = [
+    { name: 'Rose', price: 5, icon: '🌹' },
+    { name: 'Lipstick', price: 10, icon: '💄' },
+    { name: 'Ring', price: 15, icon: '💍' },
+    { name: 'Bangles', price: 25, icon: '🧿' },
+    { name: 'Ear Rings', price: 50, icon: '👂' },
+    { name: 'Diamond', price: 99, icon: '💎' },
+    { name: 'Dress', price: 149, icon: '👗' },
+    { name: 'Princess Dress', price: 199, icon: '👑' },
+    { name: 'Crown', price: 249, icon: '👑' },
+    { name: 'Car', price: 299, icon: '🚗' },
+    { name: 'Sports Car', price: 349, icon: '🏎️' },
+    { name: 'Luxury Car', price: 399, icon: '🚙' },
+    { name: 'Executive Car', price: 449, icon: '🚕' },
+    { name: 'Royal Car', price: 499, icon: '🚓' },
+  ] as const;
+
+  const minRedeemBalance = 500;
+  const canRedeem = streamerWallet >= minRedeemBalance;
 
   // 3. Refs (फाइल अपलोड और वीडियो स्ट्रीमिंग के लिए)
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -74,6 +97,26 @@ export default function Index() {
       streamRef.current.getTracks().forEach(track => track.stop());
     }
     setIsStreaming(false);
+  };
+
+  const handleGiftSend = (gift: (typeof giftCatalog)[number]) => {
+    if (walletBalance < gift.price) {
+      alert('Your wallet balance is too low for this gift.');
+      return;
+    }
+
+    setWalletBalance(prev => prev - gift.price);
+    const streamerShare = Number((gift.price * 0.45).toFixed(2));
+    setStreamerWallet(prev => Number((prev + streamerShare).toFixed(2)));
+  };
+
+  const handleRedeem = () => {
+    if (!canRedeem) {
+      return;
+    }
+
+    setRedeemedAmount(prev => prev + streamerWallet);
+    setStreamerWallet(0);
   };
 
   // 1. लॉगिन / साइनअप यूआई (यदि लॉगइन नहीं है)
@@ -181,6 +224,43 @@ export default function Index() {
                 ) : (
                   <button onClick={startCamera} className="w-full py-3 bg-red-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-red-700">Start Live Streaming Now</button>
                 )}
+
+                <div className="space-y-3 border-t border-gray-100 pt-4 text-left">
+                  <div className="flex items-center justify-between text-xs text-gray-500">
+                    <span>Wallet: ₹{walletBalance}</span>
+                    <span>Streamer wallet: ₹{streamerWallet.toFixed(2)}</span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    {giftCatalog.map((gift) => (
+                      <button
+                        key={`${gift.name}-${gift.price}`}
+                        onClick={() => handleGiftSend(gift)}
+                        className="rounded-2xl border border-pink-100 bg-pink-50/40 p-2 text-center transition hover:border-pink-200 hover:bg-pink-50"
+                      >
+                        <div className="text-2xl mb-1">{gift.icon}</div>
+                        <div className="text-[10px] font-bold text-gray-700 leading-tight">{gift.name}</div>
+                        <div className="mt-1 text-[10px] font-semibold text-pink-600">₹{gift.price}</div>
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={handleRedeem}
+                    disabled={!canRedeem}
+                    className={`w-full py-2.5 rounded-xl font-bold text-sm transition ${
+                      canRedeem
+                        ? 'bg-green-600 text-white hover:bg-green-700'
+                        : 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                    }`}
+                  >
+                    {canRedeem ? `Redeem ₹${streamerWallet.toFixed(2)}` : `Redeem minimum ₹${minRedeemBalance}`}
+                  </button>
+
+                  <div className="text-[10px] text-gray-400">
+                    45% of each gift value goes to the streamer wallet. Total redeemed: ₹{redeemedAmount.toFixed(2)}
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="py-8 space-y-4">
