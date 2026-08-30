@@ -306,6 +306,13 @@ export default function SocialDashboard({ session, onSignOut }: SocialDashboardP
           onMessageChange={setRoomMessage}
           onSendMessage={sendRoomMessage}
           onModeRequest={(mode) => void startMedia(mode)}
+          onBack={() => { stopMedia(); setActiveTab('home'); }}
+          youtubeQuery={youtubeUrl}
+          youtubeVideoId={youtubeVideoId}
+          onYoutubeQueryChange={setYoutubeUrl}
+          onResolveYoutube={resolveYoutubeQuery}
+          youtubeSearchLoading={youtubeSearchLoading}
+          youtubeSearchMessage={youtubeSearchMessage}
           onSeat={(seat) => setJoinedSeats((current) => current.includes(seat) ? current.filter((item) => item !== seat) : [...current, seat])}
           onTheme={() => setRoomTheme((roomTheme + 1) % roomThemes.length)}
           onInvite={() => setInviteOpen(true)}
