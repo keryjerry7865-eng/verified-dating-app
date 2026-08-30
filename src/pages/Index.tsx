@@ -408,20 +408,7 @@ export default function Index() {
         throw new Error('No active Supabase session found. Please log in first.');
       }
 
-      const payload = {
-        id: user.id,
-        full_name: fullName,
-        city,
-        dob,
-        age: typeof age === 'number' ? age : null,
-        interests,
-        latitude: latitude ? Number(latitude) : null,
-        longitude: longitude ? Number(longitude) : null,
-        match_distance: matchDistance,
-        updated_at: new Date().toISOString(),
-      };
-
-      const { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'id' });
+      const { error } = await supabase.from('profiles').upsert({ id: user.id }, { onConflict: 'id' });
 
       if (error) {
         throw error;

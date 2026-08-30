@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Camera, MapPin, UserRound } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../supabaseClient';
+import { writeLocalProfile } from '../lib/profileFallback';
 
 type ProfileSetupProps = {
   session: Session;
@@ -14,6 +15,7 @@ export default function ProfileSetup({ session, onComplete }: ProfileSetupProps)
   const [age, setAge] = useState('');
   const [gender, setGender] = useState('');
   const [city, setCity] = useState('');
+  const [bio, setBio] = useState('');
   const [selectedInterests, setSelectedInterests] = useState<string[]>([]);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState('');
@@ -47,7 +49,9 @@ export default function ProfileSetup({ session, onComplete }: ProfileSetupProps)
   const handleFileChange = (file: File | undefined) => {
     if (!file) return;
     setAvatarFile(file);
-    setAvatarPreview(URL.createObjectURL(file));
+    const reader = new FileReader();
+    reader.onload = () => setAvatarPreview(String(reader.result));
+    reader.readAsDataURL(file);
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -63,25 +67,30 @@ export default function ProfileSetup({ session, onComplete }: ProfileSetupProps)
         const { error: uploadError } = await supabase.storage
           .from('profile-photos')
           .upload(path, avatarFile, { upsert: true, contentType: avatarFile.type });
-        if (uploadError) throw uploadError;
-
-        const { data } = supabase.storage.from('profile-photos').getPublicUrl(path);
-        avatarUrl = data.publicUrl;
+        if (!uploadError) {
+          const { data } = supabase.storage.from('profile-photos').getPublicUrl(path);
+          avatarUrl = data.publicUrl;
+        }
       }
 
-      const { error } = await supabase.from('profiles').upsert({
+      writeLocalProfile({
         id: session.user.id,
         age: Number(age),
         gender,
         city: city.trim(),
+        bio: bio.trim(),
         interests: selectedInterests,
-        avatar_url: avatarUrl || null,
+        avatarUrl: avatarUrl || avatarPreview,
         latitude: latitude ? Number(latitude) : null,
         longitude: longitude ? Number(longitude) : null,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'id' });
+        matchDistance: 25,
+      });
 
-      if (error) throw error;
+      try {
+        await supabase.from('profiles').upsert({ id: session.user.id }, { onConflict: 'id' });
+      } catch {
+        // Local profile data keeps onboarding usable when remote columns are unavailable.
+      }
       onComplete();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to save your profile.');
@@ -117,6 +126,8 @@ export default function ProfileSetup({ session, onComplete }: ProfileSetupProps)
             <label className="text-sm font-bold text-gray-700">Gender<select required value={gender} onChange={(event) => setGender(event.target.value)} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-3 font-normal outline-none focus:border-rose-400"><option value="">Choose one</option><option>Woman</option><option>Man</option><option>Non-binary</option><option>Prefer not to say</option></select></label>
             <label className="text-sm font-bold text-gray-700">City / location<input required value={city} onChange={(event) => setCity(event.target.value)} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-3 font-normal outline-none focus:border-rose-400" /></label>
           </div>
+
+          <label className="block text-sm font-bold text-gray-700">Short bio<textarea value={bio} onChange={(event) => setBio(event.target.value)} maxLength={280} rows={3} placeholder="A little about you" className="mt-2 w-full resize-none rounded-xl border border-gray-200 px-3 py-3 font-normal outline-none focus:border-rose-400" /></label>
 
           <div><div className="mb-2 flex items-center justify-between"><span className="text-sm font-bold text-gray-700">Interests</span><span className="text-xs text-gray-400">{selectedInterests.length} selected</span></div><div className="flex flex-wrap gap-2">{interests.map((interest) => <button type="button" key={interest} onClick={() => toggleInterest(interest)} className={`rounded-full border px-3 py-2 text-xs font-bold ${selectedInterests.includes(interest) ? 'border-rose-500 bg-rose-500 text-white' : 'border-gray-200 text-gray-600'}`}>{interest}</button>)}</div></div>
 

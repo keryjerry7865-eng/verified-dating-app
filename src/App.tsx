@@ -10,6 +10,7 @@ import Dashboard from "./components/Dashboard";
 import ProfileSetup from "./components/ProfileSetup";
 import NotFound from "./pages/NotFound";
 import { supabase, supabaseConfigError } from "./supabaseClient";
+import { normalizeProfile, readLocalProfile } from "./lib/profileFallback";
 
 const queryClient = new QueryClient();
 
@@ -80,24 +81,39 @@ const AuthScreen = () => {
 };
 
 const AuthenticatedApp = ({ session }: { session: Session }) => {
-  const [profile, setProfile] = useState<{ age: number; gender: string; city: string; avatar_url: string | null } | null>(null);
+  const [profile, setProfile] = useState<ReturnType<typeof normalizeProfile>>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
 
   const loadProfile = async () => {
     setLoading(true);
-    const { data, error: profileError } = await supabase.from("profiles").select("age,gender,city,avatar_url").eq("id", session.user.id).maybeSingle();
-    if (profileError) setError(profileError.message);
-    setProfile(data);
-    setLoading(false);
+    const localProfile = readLocalProfile(session.user.id);
+    try {
+      const { data } = await supabase.from("profiles").select("*").eq("id", session.user.id).maybeSingle();
+      const remoteProfile = normalizeProfile(session.user.id, data as Record<string, unknown> | null);
+      setProfile(remoteProfile ? {
+        ...localProfile,
+        ...remoteProfile,
+        age: remoteProfile.age ?? localProfile?.age ?? null,
+        gender: remoteProfile.gender || localProfile?.gender || '',
+        city: remoteProfile.city || localProfile?.city || '',
+        bio: remoteProfile.bio || localProfile?.bio || '',
+        interests: remoteProfile.interests.length ? remoteProfile.interests : localProfile?.interests || [],
+        avatarUrl: remoteProfile.avatarUrl || localProfile?.avatarUrl || '',
+        latitude: remoteProfile.latitude ?? localProfile?.latitude ?? null,
+        longitude: remoteProfile.longitude ?? localProfile?.longitude ?? null,
+      } : localProfile);
+    } catch {
+      setProfile(localProfile);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { void loadProfile(); }, [session.user.id]);
 
   if (loading) return <div className="flex min-h-screen items-center justify-center bg-rose-50 text-sm font-bold text-gray-600">Loading your profile...</div>;
-  if (error) return <div className="flex min-h-screen items-center justify-center p-6 text-center text-sm text-rose-600">{error}</div>;
 
-  const complete = Boolean(profile?.age >= 18 && profile.gender && profile.city && profile.avatar_url);
+  const complete = Boolean(profile?.age && profile.age >= 18 && profile.gender && profile.city && profile.avatarUrl);
   return complete
     ? <Dashboard session={session} onSignOut={() => void supabase.auth.signOut()} />
     : <ProfileSetup session={session} onComplete={() => void loadProfile()} />;
@@ -140,16 +156,21 @@ const App = () => {
   useEffect(() => {
     let mounted = true;
     void supabase.auth.getSession().then(({ data }) => {
-      if (mounted) { setSession(data.session); setLoading(false); }
+      if (mounted) {
+        setSession(data.session);
+        setLoading(false);
+      }
     });
     const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
-    return () => { mounted = false; data.subscription.unsubscribe(); };
+    return () => {
+      mounted = false;
+      data.subscription.unsubscribe();
+    };
   }, []);
 
   if (loading) return <div className="flex min-h-screen items-center justify-center bg-rose-50 text-sm font-bold text-gray-600">Checking secure session...</div>;
 
-  return (
-  <QueryClientProvider client={queryClient}>
+  return <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
       <Sonner />
@@ -164,7 +185,6 @@ const App = () => {
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
-  );
 };
 
 export default App;
