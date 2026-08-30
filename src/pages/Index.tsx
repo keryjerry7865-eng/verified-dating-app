@@ -1,9 +1,26 @@
-import { useState, useRef } from 'react';
-import { Heart, User, Video, CreditCard, Image as ImageIcon, LogOut } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Heart, User, Video, CreditCard, Image as ImageIcon, LogOut, Mail, LockKeyhole } from 'lucide-react';
+import type { Session } from '@supabase/supabase-js';
+import { useNavigate } from 'react-router-dom';
+import { supabase, supabaseConfigError } from '../supabaseClient';
+import PaymentQr from '../components/PaymentQr';
+
+const formatAuthError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error || 'Unknown authentication error');
+  const normalizedMessage = message.toLowerCase();
+
+  if (normalizedMessage.includes('failed to fetch') || normalizedMessage.includes('network')) {
+    return 'Network error: check your internet connection, Supabase project status, and browser extensions, then try again.';
+  }
+
+  return message;
+};
 
 export default function Index() {
+  const navigate = useNavigate();
   // 1. ऑथेंटिकेशन और ऐप कोर स्टेट्स
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [session, setSession] = useState<Session | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('swipe');
   const [likesCount, setLikesCount] = useState(40);
@@ -19,10 +36,28 @@ export default function Index() {
   const [reportCount, setReportCount] = useState(0);
   const [reportProof, setReportProof] = useState<string | null>(null);
   const [isBanned, setIsBanned] = useState(false);
+  const [showPaymentQr, setShowPaymentQr] = useState(false);
+  const [authMessage, setAuthMessage] = useState('');
+  const [authMode, setAuthMode] = useState<'sign-in' | 'sign-up'>('sign-in');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
   // 2. मीडिया स्टेट्स
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
+
+  const [latitude, setLatitude] = useState('');
+  const [longitude, setLongitude] = useState('');
+  const [locationLoading, setLocationLoading] = useState(false);
+  const [locationStatus, setLocationStatus] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [city, setCity] = useState('Delhi');
+  const [dob, setDob] = useState('');
+  const [age, setAge] = useState<number | ''>('');
+  const [interests, setInterests] = useState<string[]>([]);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMessage, setProfileMessage] = useState('');
+  const [matchDistance, setMatchDistance] = useState(25);
 
   const giftCatalog = [
     { name: 'Rose', price: 5, icon: '🌹' },
@@ -54,17 +89,115 @@ export default function Index() {
 
   // डमी यूजर डेटा
   const name = "राहुल";
-  const city = "दिल्ली";
-  const age = 24;
   const gender = "Male";
 
-  // गूगल लॉगिन सिमुलेशन
-  const handleGoogleLogin = () => {
+  const hobbyOptions = ['Travel', 'Music', 'Cooking', 'Movies', 'Dancing', 'Gaming', 'Fitness', 'Art', 'Reading', 'Photography'];
+  const hasCoordinates = latitude.trim() !== '' && longitude.trim() !== '' && Number.isFinite(Number(latitude)) && Number.isFinite(Number(longitude));
+
+  useEffect(() => {
+    if (!dob) {
+      setAge('');
+      return;
+    }
+
+    const birthDate = new Date(dob);
+    const today = new Date();
+    let calculatedAge = today.getFullYear() - birthDate.getFullYear();
+    const monthDifference = today.getMonth() - birthDate.getMonth();
+
+    if (monthDifference < 0 || (monthDifference === 0 && today.getDate() < birthDate.getDate())) {
+      calculatedAge -= 1;
+    }
+
+    setAge(calculatedAge);
+  }, [dob]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const syncSession = async () => {
+      if (supabaseConfigError) {
+        setAuthMessage(supabaseConfigError);
+        setSessionLoading(false);
+        return;
+      }
+
+      try {
+      const { data, error } = await supabase.auth.getSession();
+      if (!isMounted) return;
+
+      if (error) {
+        setAuthMessage(error.message);
+        setSessionLoading(false);
+        return;
+      }
+
+      setSession(data.session);
+      setSessionLoading(false);
+      } catch (error) {
+        if (isMounted) {
+          setAuthMessage(formatAuthError(error));
+          setSessionLoading(false);
+        }
+      }
+    };
+
+    syncSession();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (isMounted) {
+        setSession(session);
+        setSessionLoading(false);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleEmailAuth = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     setAuthLoading(true);
-    setTimeout(() => {
-      setIsLoggedIn(true);
+    setAuthMessage('');
+
+    if (supabaseConfigError) {
+      setAuthMessage(supabaseConfigError);
       setAuthLoading(false);
-    }, 1500);
+      return;
+    }
+
+    try {
+      const result = authMode === 'sign-in'
+        ? await supabase.auth.signInWithPassword({ email, password })
+        : await supabase.auth.signUp({ email, password });
+
+      if (result.error) {
+        setAuthMessage(formatAuthError(result.error));
+      } else if (authMode === 'sign-up' && !result.data.session) {
+        setAuthMessage('Account created. Check your email to confirm your account, then sign in.');
+        setAuthMode('sign-in');
+      } else if (result.data.session) {
+        navigate('/');
+      }
+    } catch (error) {
+      setAuthMessage(formatAuthError(error));
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    stopCamera();
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      setAuthMessage(error.message);
+      return;
+    }
+
+    setSession(null);
+  navigate('/', { replace: true });
   };
 
   // फाइल अपलोड इनपुट को ट्रिगर करना
@@ -160,8 +293,162 @@ export default function Index() {
     await startCamera();
   };
 
-  // 1. लॉगिन / साइनअप यूआई (यदि लॉगइन नहीं है)
-  if (!isLoggedIn) {
+  const handleUseCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationStatus('Geolocation is not supported by this browser.');
+      return;
+    }
+
+    setLocationLoading(true);
+    setLocationStatus('Fetching your current location...');
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude.toFixed(6);
+        const lng = position.coords.longitude.toFixed(6);
+
+        setLatitude(lat);
+        setLongitude(lng);
+        setLocationStatus('Location captured successfully.');
+
+        try {
+          const response = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${position.coords.latitude}&lon=${position.coords.longitude}`
+          );
+          const data = await response.json();
+          const placeName =
+            data?.address?.city ||
+            data?.address?.town ||
+            data?.address?.village ||
+            data?.address?.state ||
+            'Current location';
+
+          if (placeName && placeName !== 'Current location') {
+            setCity(placeName);
+          }
+        } catch (error) {
+          console.error('Reverse geocoding failed:', error);
+        } finally {
+          setLocationLoading(false);
+        }
+      },
+      (error) => {
+        setLocationLoading(false);
+        setLocationStatus(error.message || 'Unable to access your current location.');
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0,
+      }
+    );
+  };
+
+  const handlePremiumPlanSelect = (plan: { id: string; name: string; price: string; popular: boolean }) => {
+    setSelectedPlan(plan);
+    setIsPremium(true);
+
+    setShowPaymentQr(true);
+  };
+
+  const handleConfirmPremiumPayment = async () => {
+    try {
+      const amount = Number((selectedPlan?.price ?? '₹249').replace(/[^\d.]/g, '')) || 249;
+      const nextWalletBalance = walletBalance + amount;
+
+      setWalletBalance(nextWalletBalance);
+      setShowPaymentQr(false);
+
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        return;
+      }
+
+      const { error } = await supabase
+        .from('profiles')
+        .upsert(
+          {
+            id: user.id,
+            wallet_balance: nextWalletBalance,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'id' }
+        );
+
+      if (error) {
+        console.error('Unable to sync wallet balance:', error);
+      }
+    } catch (error) {
+      console.error('Premium payment confirmation failed:', error);
+    }
+  };
+
+  const toggleInterest = (interest: string) => {
+    setInterests((prev) =>
+      prev.includes(interest) ? prev.filter((item) => item !== interest) : [...prev, interest],
+    );
+  };
+
+  const handleSaveProfile = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setProfileSaving(true);
+    setProfileMessage('');
+
+    try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        throw new Error('No active Supabase session found. Please log in first.');
+      }
+
+      const payload = {
+        id: user.id,
+        full_name: fullName,
+        city,
+        dob,
+        age: typeof age === 'number' ? age : null,
+        interests,
+        latitude: latitude ? Number(latitude) : null,
+        longitude: longitude ? Number(longitude) : null,
+        match_distance: matchDistance,
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'id' });
+
+      if (error) {
+        throw error;
+      }
+
+      setProfileMessage('Profile saved successfully with your location coordinates.');
+    } catch (error: any) {
+      console.error(error);
+      setProfileMessage(error.message || 'Unable to save profile.');
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  if (sessionLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-pink-50 to-red-100 flex items-center justify-center p-4">
+        <div className="rounded-3xl bg-white px-8 py-6 text-center shadow-xl">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-red-500 border-t-transparent" />
+          <p className="mt-3 text-sm font-semibold text-gray-700">Checking your secure session...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 1. Login / signup landing screen. No dashboard UI renders without a session.
+  if (!session) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-pink-50 to-red-100 flex flex-col items-center justify-center p-4">
         <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 text-center space-y-6 border border-pink-100">
@@ -171,21 +458,52 @@ export default function Index() {
           </div>
           <p className="text-gray-500 text-sm">अपने परफेक्ट मैच से जुड़ने के लिए लॉगिन या साइनअप करें</p>
           
-          <button 
-            onClick={handleGoogleLogin}
-            disabled={authLoading}
-            className="w-full py-3.5 bg-white border-2 border-gray-200 rounded-xl font-bold text-sm text-gray-700 shadow-sm flex items-center justify-center gap-3 hover:bg-gray-50 transition active:scale-95 disabled:opacity-50"
+          {authMessage && <p className="text-xs text-red-600">{authMessage}</p>}
+
+          <form onSubmit={handleEmailAuth} className="space-y-3 text-left">
+            <div className="relative">
+              <Mail className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-gray-400" />
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="Email address"
+                autoComplete="email"
+                required
+                className="w-full rounded-xl border border-gray-200 py-3 pl-10 pr-3 text-sm outline-none transition focus:border-pink-400 focus:ring-2 focus:ring-pink-100"
+              />
+            </div>
+            <div className="relative">
+              <LockKeyhole className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-gray-400" />
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="Password"
+                autoComplete={authMode === 'sign-in' ? 'current-password' : 'new-password'}
+                minLength={6}
+                required
+                className="w-full rounded-xl border border-gray-200 py-3 pl-10 pr-3 text-sm outline-none transition focus:border-pink-400 focus:ring-2 focus:ring-pink-100"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={authLoading}
+              className="w-full rounded-xl bg-gray-900 py-3.5 text-sm font-bold text-white shadow-lg transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {authLoading ? 'Please wait...' : authMode === 'sign-in' ? 'Sign in with email' : 'Create account'}
+            </button>
+          </form>
+
+          <button
+            type="button"
+            onClick={() => {
+              setAuthMode((mode) => mode === 'sign-in' ? 'sign-up' : 'sign-in');
+              setAuthMessage('');
+            }}
+            className="text-xs font-semibold text-pink-600 hover:text-pink-700"
           >
-            {authLoading ? (
-              <div className="w-5 h-5 border-2 border-red-500 border-t-transparent rounded-full animate-spin"></div>
-            ) : (
-              <>
-                <svg className="w-5 h-5" viewBox="0 0 24 24">
-                  <path fill="#EA4335" d="M12.24 10.285V14.4h6.887c-.275 1.565-1.88 4.604-6.887 4.604-4.33 0-7.866-3.577-7.866-8s3.536-8 7.866-8c2.46 0 4.105 1.025 5.047 1.926l3.227-3.227C18.216 1.414 15.48 0 12.24 0 5.58 0 0 5.58 0 12.24s5.58 12.24 12.24 12.24c6.96 0 11.57-4.89 11.57-11.79 0-.795-.085-1.4-.195-1.905H12.24z"/>
-                </svg>
-                Continue with Google
-              </>
-            )}
+            {authMode === 'sign-in' ? 'New here? Create an account' : 'Already have an account? Sign in'}
           </button>
           
           <div className="text-xs text-gray-400">By continuing, you agree to our Terms & Privacy Policy</div>
@@ -204,7 +522,7 @@ export default function Index() {
             This streamer account has been blocked after multiple genuine user reports and proof submissions.
           </p>
           <button
-            onClick={() => setIsLoggedIn(false)}
+            onClick={handleLogout}
             className="w-full py-3 bg-red-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-red-700"
           >
             Return to Login
@@ -232,7 +550,7 @@ export default function Index() {
           ) : (
             <span className="bg-gray-200 text-gray-600 px-2.5 py-1 rounded-full text-xs font-bold">Free</span>
           )}
-          <button onClick={() => { stopCamera(); setIsLoggedIn(false); }} className="text-gray-400 hover:text-red-500 p-1">
+          <button onClick={handleLogout} className="text-gray-400 hover:text-red-500 p-1">
             <LogOut className="w-4 h-4" />
           </button>
         </div>
@@ -285,6 +603,51 @@ export default function Index() {
             >
               Simulate Getting +10 Likes 👍
             </button>
+
+            <div className="border-t border-gray-100 pt-4 text-left">
+              <div className="flex items-center justify-between">
+                <label htmlFor="match-distance" className="text-sm font-bold text-gray-800">Matching distance</label>
+                <span className="rounded-full bg-pink-50 px-2.5 py-1 text-xs font-bold text-pink-600">{matchDistance} km</span>
+              </div>
+              <input
+                id="match-distance"
+                type="range"
+                min="5"
+                max="100"
+                step="1"
+                value={matchDistance}
+                onChange={(event) => setMatchDistance(Number(event.target.value))}
+                className="mt-3 w-full accent-pink-500"
+              />
+              <div className="mt-1 flex justify-between text-[10px] text-gray-400">
+                <span>5 km</span>
+                <span>100 km</span>
+              </div>
+            </div>
+
+            <div className="border-t border-gray-100 pt-4 text-left">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-bold text-gray-800">Your location</h4>
+                {hasCoordinates && <span className="text-[10px] font-semibold text-green-600">Coordinates saved</span>}
+              </div>
+              {hasCoordinates ? (
+                <>
+                  <iframe
+                    title="Your saved location"
+                    src={`https://www.openstreetmap.org/export/embed.html?layer=mapnik&marker=${Number(latitude)},${Number(longitude)}`}
+                    className="mt-3 h-44 w-full rounded-2xl border border-gray-200"
+                    loading="lazy"
+                  />
+                  <p className="mt-2 text-[10px] text-gray-500">
+                    {city} · {Number(latitude).toFixed(6)}, {Number(longitude).toFixed(6)}
+                  </p>
+                </>
+              ) : (
+                <p className="mt-2 rounded-xl bg-gray-50 p-3 text-xs text-gray-500">
+                  Add your location in Profile, then save it to show the map here.
+                </p>
+              )}
+            </div>
           </div>
         )}
 
@@ -356,6 +719,44 @@ export default function Index() {
                     placeholder="yourupi@upi"
                     className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-pink-300 focus:outline-none"
                   />
+                </div>
+
+                <div className="space-y-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={handleUseCurrentLocation}
+                    disabled={locationLoading}
+                    className="w-full rounded-xl bg-blue-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-blue-700 disabled:opacity-60"
+                  >
+                    {locationLoading ? 'Getting location...' : 'Use current location'}
+                  </button>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Latitude</label>
+                      <input
+                        type="text"
+                        value={latitude}
+                        onChange={(e) => setLatitude(e.target.value)}
+                        placeholder="Latitude"
+                        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-pink-300 focus:outline-none"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Longitude</label>
+                      <input
+                        type="text"
+                        value={longitude}
+                        onChange={(e) => setLongitude(e.target.value)}
+                        placeholder="Longitude"
+                        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-pink-300 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {locationStatus && (
+                    <div className="text-[10px] text-gray-500">{locationStatus}</div>
+                  )}
                 </div>
 
                 <button
@@ -431,6 +832,145 @@ export default function Index() {
           </div>
         )}
 
+        {/* प्रोफाइल / सेटअप टैब */}
+        {activeTab === 'profile-setup' && (
+          <div className="bg-white rounded-3xl shadow-xl p-6 border border-gray-100">
+            <h3 className="text-2xl font-bold text-gray-800 text-center mb-5">Profile Setup</h3>
+            <form onSubmit={handleSaveProfile} className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Full Name</label>
+                <input
+                  type="text"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Enter your full name"
+                  className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-pink-300 focus:outline-none"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">City</label>
+                <input
+                  type="text"
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  placeholder="Enter your city"
+                  className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-pink-300 focus:outline-none"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Date of Birth</label>
+                <input
+                  type="date"
+                  value={dob}
+                  onChange={(e) => setDob(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-pink-300 focus:outline-none"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Age</label>
+                <input
+                  type="number"
+                  value={age}
+                  readOnly
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-600 focus:outline-none"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="profile-match-distance" className="text-sm font-medium text-gray-700">Matching distance</label>
+                  <span className="rounded-full bg-pink-50 px-2.5 py-1 text-xs font-bold text-pink-600">{matchDistance} km</span>
+                </div>
+                <input
+                  id="profile-match-distance"
+                  type="range"
+                  min="5"
+                  max="100"
+                  step="1"
+                  value={matchDistance}
+                  onChange={(event) => setMatchDistance(Number(event.target.value))}
+                  className="w-full accent-pink-500"
+                />
+                <div className="flex justify-between text-[10px] text-gray-400">
+                  <span>5 km</span>
+                  <span>100 km</span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Use current location</label>
+                <button
+                  type="button"
+                  onClick={handleUseCurrentLocation}
+                  disabled={locationLoading}
+                  className="w-full rounded-xl bg-blue-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-blue-700 disabled:opacity-60"
+                >
+                  {locationLoading ? 'Getting location...' : 'Use current location'}
+                </button>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Latitude</label>
+                    <input
+                      type="text"
+                      value={latitude}
+                      onChange={(e) => setLatitude(e.target.value)}
+                      placeholder="Latitude"
+                      className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-pink-300 focus:outline-none"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Longitude</label>
+                    <input
+                      type="text"
+                      value={longitude}
+                      onChange={(e) => setLongitude(e.target.value)}
+                      placeholder="Longitude"
+                      className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-pink-300 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                {locationStatus && <div className="text-[10px] text-gray-500">{locationStatus}</div>}
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Interests / Hobbies</label>
+                <div className="flex flex-wrap gap-2">
+                  {hobbyOptions.map((interest) => {
+                    const selected = interests.includes(interest);
+                    return (
+                      <button
+                        type="button"
+                        key={interest}
+                        onClick={() => toggleInterest(interest)}
+                        className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                          selected ? 'border-pink-500 bg-pink-500 text-white' : 'border-gray-200 bg-white text-gray-600 hover:border-pink-200'
+                        }`}
+                      >
+                        {interest}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={profileSaving}
+                className="w-full rounded-xl bg-red-500 py-3 text-sm font-bold text-white shadow-md hover:bg-red-600 disabled:opacity-60"
+              >
+                {profileSaving ? 'Saving...' : 'Save Profile'}
+              </button>
+
+              {profileMessage && <p className="text-center text-xs text-gray-600">{profileMessage}</p>}
+            </form>
+          </div>
+        )}
+
         {/* प्रीमियम टैब */}
         {activeTab === 'premium' && (
           <div className="bg-white rounded-3xl shadow-xl p-6 border border-gray-100 space-y-5">
@@ -443,11 +983,7 @@ export default function Index() {
             ].map((plan) => (
               <button
                 key={plan.id}
-                onClick={() => {
-                  setSelectedPlan(plan);
-                  setIsPremium(true);
-                  setActiveTab('swipe');
-                }}
+                onClick={() => handlePremiumPlanSelect(plan)}
                 className={`w-full rounded-2xl border p-4 text-left transition ${
                   selectedPlan?.id === plan.id || plan.popular
                     ? 'border-yellow-400 bg-yellow-50 shadow-sm'
@@ -473,6 +1009,21 @@ export default function Index() {
               <div className="flex items-center justify-center gap-2 text-sm font-bold">
                 <CreditCard className="w-4 h-4" /> Secure payment
               </div>
+              <button
+                type="button"
+                onClick={() => setShowPaymentQr(true)}
+                className="mt-3 w-full rounded-xl bg-white/20 px-3 py-2 text-xs font-bold text-white hover:bg-white/30"
+              >
+                Show dynamic QR
+              </button>
+              {showPaymentQr && (
+                <PaymentQr
+                  upiId="demo@upi"
+                  payeeName="LoveMatch"
+                  amount={Number((selectedPlan?.price ?? '₹249').replace(/[^\d.]/g, '')) || 249}
+                  onConfirm={handleConfirmPremiumPayment}
+                />
+              )}
             </div>
           </div>
         )}
@@ -480,11 +1031,12 @@ export default function Index() {
 
       {/* 하단 네비게이션 */}
       <div className="w-full max-w-md fixed bottom-0 left-1/2 -translate-x-1/2 bg-white border-t shadow-lg">
-        <div className="grid grid-cols-4 gap-1 p-2">
+        <div className="grid grid-cols-5 gap-1 p-2">
           {[
             { id: 'swipe', label: 'Swipe', icon: Heart },
             { id: 'live', label: 'Live', icon: Video },
             { id: 'moments', label: 'Moments', icon: ImageIcon },
+            { id: 'profile-setup', label: 'Profile', icon: User },
             { id: 'premium', label: 'Premium', icon: CreditCard },
           ].map(({ id, label, icon: Icon }) => (
             <button
