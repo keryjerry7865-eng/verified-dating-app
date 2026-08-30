@@ -1,154 +1,276 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bell, CalendarDays, ChevronLeft, Coins, Crown, Gamepad2, Gift, Globe2, Heart, Home, Instagram, MessageCircle, Mic, MoreHorizontal, Music2, Palette, Phone, Play, Plus, Radio, Send, Settings, Share2, ShieldCheck, Sparkles, Trophy, UserRound, Users, Wallet, X, Zap } from 'lucide-react';
+import { Bell, Camera, ChevronLeft, Coins, Crown, Gift, Heart, Home, LogOut, MessageCircle, Mic, MicOff, Music2, Pause, Play, Plus, Radio, Send, Share2, Square, UserRound, Users, Volume2, Wallet, X, Youtube } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../supabaseClient';
 import { normalizeProfile, readLocalProfile, type LocalProfile } from '../lib/profileFallback';
-import { readWallet, writeWallet, type WalletState } from '../lib/wallet';
+import { readWallet, writeWallet, type GiftRecord, type WalletState } from '../lib/wallet';
 
 type SocialDashboardProps = { session: Session; onSignOut: () => void };
-type SocialProfile = LocalProfile & { displayName: string };
+type SocialProfile = LocalProfile & { displayName: string; likes: number; views: number };
 type Tab = 'home' | 'party' | 'chat' | 'mine';
-type Gift = { name: string; price: number; emoji: string; category: 'Gift' | 'Ring' | 'Jewelry'; kind: 'crown' | 'car' | 'flowers' | 'spark' };
+type RoomMode = 'live' | 'voice' | 'video';
+type Gift = { name: string; emoji: string; price: number };
+type ChatMessage = { id: string; senderId: string; senderName: string; body: string; createdAt: string };
 
-const games = ['Truth & Dare', 'Undercover', 'Dominoes', 'Draw & Guess', 'Ludo', 'Snakes & Ladders', 'Carrom'];
 const seats = Array.from({ length: 10 }, (_, index) => index + 1);
 const gifts: Gift[] = [
-  { name: 'Heart Crown', price: 977, emoji: '👑', category: 'Gift', kind: 'crown' },
-  { name: 'Ruby Box', price: 12777, emoji: '🎁', category: 'Jewelry', kind: 'spark' },
-  { name: 'Royal Purple', price: 2777, emoji: '💜', category: 'Gift', kind: 'spark' },
-  { name: 'Star Water', price: 1777, emoji: '💧', category: 'Gift', kind: 'spark' },
-  { name: 'Luxury Feast', price: 5777, emoji: '🍱', category: 'Jewelry', kind: 'spark' },
-  { name: 'Blazing Kiss', price: 3777, emoji: '💋', category: 'Gift', kind: 'flowers' },
-  { name: 'Star Frost Box', price: 7777, emoji: '❄️', category: 'Ring', kind: 'spark' },
-  { name: 'Diamond Ring', price: 4999, emoji: '💍', category: 'Ring', kind: 'crown' },
-  { name: 'Flower Burst', price: 888, emoji: '💐', category: 'Gift', kind: 'flowers' },
+  { name: 'Rose', emoji: '🌹', price: 10 },
+  { name: 'Crown', emoji: '👑', price: 150 },
+  { name: 'Bike', emoji: '🏍️', price: 100 },
+  { name: 'Car', emoji: '🚗', price: 250 },
 ];
-
 const roomThemes = [
-  { name: 'Birthday Bash', colors: 'from-fuchsia-800 via-rose-700 to-orange-500', icon: '🎂' },
-  { name: 'DJ Club', colors: 'from-indigo-950 via-violet-900 to-fuchsia-700', icon: '🎧' },
-  { name: 'Moon Garden', colors: 'from-slate-950 via-cyan-900 to-emerald-700', icon: '🌙' },
+  'from-rose-600 via-fuchsia-700 to-violet-900',
+  'from-cyan-700 via-blue-900 to-indigo-950',
+  'from-orange-500 via-rose-700 to-purple-950',
 ];
+const swipeKey = (userId: string) => `lovematch-swipes:${userId}`;
+const metricKey = (userId: string, profileId: string) => `lovematch-metrics:${userId}:${profileId}`;
 
-const gamesForDisplay = games.map((name, index) => ({ name, emoji: ['🎭', '🕵️', '🀄', '🎨', '🎲', '🐍', '🎯'][index] }));
+const getName = (profile: LocalProfile | null, session: Session) => profile?.id === session.user.id
+  ? session.user.user_metadata?.name || session.user.user_metadata?.display_name || session.user.email?.split('@')[0] || 'Member'
+  : `Member ${profile?.id.slice(0, 5) || 'guest'}`;
 
 export default function SocialDashboard({ session, onSignOut }: SocialDashboardProps) {
   const [activeTab, setActiveTab] = useState<Tab>('home');
-  const [wallet, setWallet] = useState<WalletState>(() => readWallet(session.user.id));
+  const [roomMode, setRoomMode] = useState<RoomMode>('voice');
   const [roomTheme, setRoomTheme] = useState(0);
   const [roomName, setRoomName] = useState('Midnight Voice Lounge');
-  const [roomId, setRoomId] = useState('LM-2486');
-  const [hostMode, setHostMode] = useState(false);
-  const [joinedSeats, setJoinedSeats] = useState<number[]>([1, 4, 7]);
-  const [activeGame, setActiveGame] = useState('');
-  const [giftCategory, setGiftCategory] = useState<Gift['category']>('Gift');
-  const [selectedGift, setSelectedGift] = useState<Gift | null>(null);
+  const [roomId] = useState('LM-2486');
+  const [people, setPeople] = useState<SocialProfile[]>([]);
+  const [profile, setProfile] = useState<SocialProfile | null>(null);
+  const [wallet, setWallet] = useState<WalletState>(() => readWallet(session.user.id));
+  const [alerts, setAlerts] = useState<string[]>([]);
+  const [activeGift, setActiveGift] = useState<Gift | null>(null);
   const [giftTarget, setGiftTarget] = useState<SocialProfile | null>(null);
-  const [storeOpen, setStoreOpen] = useState(false);
+  const [selectedProfile, setSelectedProfile] = useState<SocialProfile | null>(null);
   const [rechargeOpen, setRechargeOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [roomMenuOpen, setRoomMenuOpen] = useState(false);
-  const [alerts, setAlerts] = useState<string[]>([]);
-  const [profile, setProfile] = useState<SocialProfile | null>(null);
-  const [people, setPeople] = useState<SocialProfile[]>([]);
+  const [roomChat, setRoomChat] = useState<ChatMessage[]>([]);
+  const [roomMessage, setRoomMessage] = useState('');
+  const [joinedSeats, setJoinedSeats] = useState<number[]>([1]);
+  const [micLevels, setMicLevels] = useState<number[]>(Array(10).fill(0));
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [mediaError, setMediaError] = useState('');
+  const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [audioUrl, setAudioUrl] = useState('');
+  const [audioPlaying, setAudioPlaying] = useState(false);
+  const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [youtubeVideoId, setYoutubeVideoId] = useState('');
+  const [audioVolume, setAudioVolume] = useState(0.7);
 
-  const currentUserName = session.user.user_metadata?.name || session.user.user_metadata?.display_name || session.user.email?.split('@')[0] || 'Member';
-  const theme = roomThemes[roomTheme];
-  const visibleGifts = gifts.filter((gift) => gift.category === giftCategory);
-  const addAlert = (text: string) => {
-    setAlerts((current) => [...current, text]);
-    window.setTimeout(() => setAlerts((current) => current.filter((item) => item !== text)), 4500);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+
+  const addAlert = (message: string) => {
+    setAlerts((current) => [...current, message]);
+    window.setTimeout(() => setAlerts((current) => current.filter((item) => item !== message)), 4500);
   };
 
   useEffect(() => writeWallet(session.user.id, wallet), [session.user.id, wallet]);
 
   useEffect(() => {
-    const load = async () => {
+    const loadPeople = async () => {
       const local = readLocalProfile(session.user.id);
       try {
-        const { data: own } = await supabase.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
-        const ownProfile = normalizeProfile(session.user.id, own as Record<string, unknown> | null) || local;
-        if (ownProfile) setProfile({ ...ownProfile, displayName: currentUserName });
+        const { data: current } = await supabase.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
+        const normalized = normalizeProfile(session.user.id, current as Record<string, unknown> | null) || local;
+        if (normalized) setProfile({ ...normalized, displayName: getName(normalized, session), likes: 0, views: 0 });
         const { data: rows } = await supabase.from('profiles').select('*').neq('id', session.user.id).limit(12);
-        setPeople((rows || []).map((row) => normalizeProfile(String(row.id), row as Record<string, unknown>)).filter((item): item is LocalProfile => Boolean(item)).map((item) => ({ ...item, displayName: `Member ${item.id.slice(0, 5)}` })));
+        setPeople((rows || []).map((row) => normalizeProfile(String(row.id), row as Record<string, unknown>)).filter((item): item is LocalProfile => Boolean(item)).map((item) => {
+          const metrics = readMetrics(session.user.id, item.id);
+          return { ...item, displayName: getName(item, session), likes: metrics.likes, views: metrics.views };
+        }));
       } catch {
-        if (local) setProfile({ ...local, displayName: currentUserName });
+        if (local) setProfile({ ...local, displayName: getName(local, session), likes: 0, views: 0 });
       }
     };
-    void load();
-  }, [session.user.id, currentUserName]);
+    void loadPeople();
+  }, [session.user.id, session]);
 
   useEffect(() => {
-    const channel = supabase.channel(`social-alerts:${session.user.id}`)
+    const channel = supabase.channel(`room-events:${session.user.id}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'likes', filter: `liked_id=eq.${session.user.id}` }, () => addAlert('New like received'))
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'matches' }, () => addAlert('You have a new match'))
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'matches' }, () => addAlert('New match received'))
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
   }, [session.user.id]);
 
-  const sendGift = (gift: Gift, target: SocialProfile | null = giftTarget) => {
-    const recipientName = target?.displayName || 'the room';
-    if (wallet.coins < gift.price) {
-      setStoreOpen(true);
-      addAlert(`You need ${gift.price - wallet.coins} more coins`);
+  useEffect(() => () => stopMedia(), []);
+
+  const stopMedia = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    void audioContextRef.current?.close();
+    audioContextRef.current = null;
+    analyserRef.current = null;
+    setCameraStream(null);
+    setMicLevels(Array(10).fill(0));
+  };
+
+  const startMedia = async (mode: RoomMode) => {
+    setRoomMode(mode);
+    setMediaError('');
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setMediaError('Camera and microphone access is not supported in this browser.');
       return;
     }
-    setWallet((current) => ({ ...current, coins: current.coins - gift.price, receivedGifts: [...current.receivedGifts, { id: crypto.randomUUID(), gift: gift.name, emoji: gift.emoji, coins: gift.price, recipientId: target?.id || roomId, createdAt: new Date().toISOString() }] }));
-    setSelectedGift(gift);
-    addAlert(`${gift.name} sent to ${recipientName}`);
+    try {
+      stopMedia();
+      const stream = await navigator.mediaDevices.getUserMedia({ video: mode !== 'voice', audio: true });
+      streamRef.current = stream;
+      setCameraStream(stream);
+      if (videoRef.current && mode !== 'voice') videoRef.current.srcObject = stream;
+      const audioTrack = stream.getAudioTracks()[0];
+      if (audioTrack) connectMicMeter(stream);
+    } catch (error) {
+      setMediaError(error instanceof Error ? `Media permission failed: ${error.message}` : 'Media permission failed.');
+    }
   };
 
-  const buyCoins = (amount: number) => {
-    setWallet((current) => ({ ...current, coins: current.coins + amount, purchasedCoins: current.purchasedCoins + amount }));
-    setStoreOpen(false);
-    addAlert(`${amount} coins added to your wallet`);
+  const connectMicMeter = (stream: MediaStream) => {
+    const context = new AudioContext();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 64;
+    context.createMediaStreamSource(stream).connect(analyser);
+    audioContextRef.current = context;
+    analyserRef.current = analyser;
+    const values = new Uint8Array(analyser.frequencyBinCount);
+    const tick = () => {
+      analyser.getByteFrequencyData(values);
+      const level = Math.min(100, Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) / 2.55));
+      setMicLevels(joinedSeats.map((seat) => seat === 1 ? level : Math.max(3, Math.round(level * (0.35 + seat / 20)))));
+      animationFrameRef.current = requestAnimationFrame(tick);
+    };
+    tick();
   };
 
-  const joinSeat = (seat: number) => setJoinedSeats((current) => current.includes(seat) ? current.filter((item) => item !== seat) : [...current, seat]);
+  useEffect(() => {
+    if (videoRef.current && cameraStream && roomMode !== 'voice') videoRef.current.srcObject = cameraStream;
+  }, [cameraStream, roomMode]);
+
+  const sendRoomMessage = (event: React.FormEvent) => {
+    event.preventDefault();
+    const body = roomMessage.trim();
+    if (!body) return;
+    setRoomChat((current) => [...current, { id: crypto.randomUUID(), senderId: session.user.id, senderName: profile?.displayName || 'You', body, createdAt: new Date().toISOString() }]);
+    setRoomMessage('');
+  };
+
+  const sendGift = (gift: Gift, target: SocialProfile | null = giftTarget) => {
+    if (wallet.coins < gift.price) {
+      setRechargeOpen(true);
+      addAlert(`You need ${gift.price - wallet.coins} more coins.`);
+      return;
+    }
+    const record: GiftRecord = { id: crypto.randomUUID(), gift: gift.name, emoji: gift.emoji, coins: gift.price, recipientId: target?.id || roomId, createdAt: new Date().toISOString() };
+    setWallet((current) => ({ ...current, coins: current.coins - gift.price, receivedGifts: [...current.receivedGifts, record] }));
+    setActiveGift(gift);
+    addAlert(`${gift.name} sent${target ? ` to ${target.displayName}` : ''}.`);
+  };
+
+  const buyRecharge = () => {
+    setWallet((current) => ({ ...current, coins: current.coins + 1000, purchasedCoins: current.purchasedCoins + 1000 }));
+    setRechargeOpen(false);
+    addAlert('1,000 diamonds added to your local wallet.');
+  };
+
+  const selectProfile = (person: SocialProfile) => {
+    const next = { ...person, views: person.views + 1 };
+    setSelectedProfile(next);
+    writeMetrics(session.user.id, person.id, { views: next.views, likes: person.likes });
+    setPeople((current) => current.map((item) => item.id === person.id ? next : item));
+  };
+
+  const swipe = async (person: SocialProfile, direction: 'left' | 'right') => {
+    const saved = readSwipes(session.user.id);
+    saved[person.id] = direction;
+    writeSwipes(session.user.id, saved);
+    if (direction === 'right') {
+      const { data: reciprocal } = await supabase.from('likes').select('id').eq('liker_id', person.id).eq('liked_id', session.user.id).maybeSingle();
+      try { await supabase.from('likes').insert({ liker_id: session.user.id, liked_id: person.id, is_mutual: Boolean(reciprocal) }); } catch { /* local swipe state remains authoritative for the UI */ }
+      if (reciprocal) addAlert(`It’s a match with ${person.displayName}!`);
+    }
+    setPeople((current) => current.filter((item) => item.id !== person.id));
+  };
+
+  const handleAudioFile = (file: File | undefined) => {
+    if (!file) return;
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+    const nextUrl = URL.createObjectURL(file);
+    setAudioFile(file);
+    setAudioUrl(nextUrl);
+    setAudioPlaying(false);
+  };
+
+  const toggleAudio = async () => {
+    if (!audioRef.current || !audioUrl) return;
+    if (audioPlaying) { audioRef.current.pause(); setAudioPlaying(false); } else { await audioRef.current.play(); setAudioPlaying(true); }
+  };
+
+  const parseYoutubeId = (value: string) => {
+    try {
+      const url = new URL(value);
+      if (url.hostname.includes('youtu.be')) return url.pathname.slice(1);
+      if (url.hostname.includes('youtube.com')) return url.searchParams.get('v') || url.pathname.split('/').pop() || '';
+    } catch { return ''; }
+    return '';
+  };
+
   const tabs = useMemo(() => [{ id: 'home' as const, label: 'Home', icon: Home }, { id: 'party' as const, label: 'Party', icon: Radio }, { id: 'chat' as const, label: 'Chat', icon: MessageCircle }, { id: 'mine' as const, label: 'Mine', icon: UserRound }], []);
+  const currentCard = people[0];
 
   return (
-    <main className="min-h-screen bg-[#100d1c] pb-24 text-white">
-      <AnimatePresence>{alerts.map((alert, index) => <motion.div key={`${alert}-${index}`} initial={{ y: -80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -80, opacity: 0 }} className="fixed inset-x-4 top-4 z-[100] mx-auto max-w-md rounded-2xl border border-white/10 bg-[#242035]/95 px-4 py-3 text-sm font-bold shadow-2xl"><Sparkles className="mr-2 inline h-4 w-4 text-amber-300" />{alert}</motion.div>)}</AnimatePresence>
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#151123]/90 px-4 py-3 backdrop-blur-xl"><div className="mx-auto flex max-w-6xl items-center justify-between gap-3"><div className="flex items-center gap-2"><div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-rose-400 to-violet-600 shadow-lg"><Heart className="h-5 w-5 fill-white" /></div><span className="text-lg font-black tracking-tight">LoveMatch</span></div><div className="flex items-center gap-2 text-[11px] font-black"><span className="flex items-center gap-1 rounded-full bg-violet-500/15 px-2.5 py-1.5 text-violet-200"><Zap className="h-3.5 w-3.5" />{wallet.coins}</span><span className="flex items-center gap-1 rounded-full bg-amber-400/15 px-2.5 py-1.5 text-amber-200"><Crown className="h-3.5 w-3.5" />{Math.floor(wallet.purchasedCoins / 10)}</span><button onClick={() => setRechargeOpen(true)} className="rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-3 py-1.5 text-black">Recharge</button>{profile?.avatarUrl ? <img src={profile.avatarUrl} alt={currentUserName} className="h-9 w-9 rounded-full object-cover ring-2 ring-rose-300" /> : <div className="flex h-9 w-9 items-center justify-center rounded-full bg-violet-700"><UserRound className="h-4 w-4" /></div>}</div></div></header>
+    <main className="min-h-screen bg-[#110d1d] pb-24 text-white">
+      <AnimatePresence>{alerts.map((alert, index) => <motion.div key={`${alert}-${index}`} initial={{ y: -80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -80 }} className="fixed inset-x-4 top-4 z-[100] mx-auto max-w-md rounded-2xl border border-white/10 bg-[#241c35]/95 px-4 py-3 text-sm font-bold shadow-2xl"><Bell className="mr-2 inline h-4 w-4 text-amber-300" />{alert}</motion.div>)}</AnimatePresence>
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#171125]/90 px-4 py-3 backdrop-blur-xl"><div className="mx-auto flex max-w-6xl items-center justify-between"><div className="flex items-center gap-2"><div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-rose-400 to-violet-600"><Heart className="h-5 w-5 fill-white" /></div><span className="font-black">LoveMatch</span></div><div className="flex items-center gap-2 text-xs font-black"><span className="rounded-full bg-violet-500/20 px-3 py-1.5 text-violet-200">💎 {wallet.coins}</span><span className="rounded-full bg-amber-400/20 px-3 py-1.5 text-amber-200">👑 {Math.floor(wallet.purchasedCoins / 10)}</span><button onClick={() => setRechargeOpen(true)} className="rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-3 py-1.5 text-black">Recharge</button>{profile?.avatarUrl ? <button onClick={() => profile && selectProfile(profile)}><img src={profile.avatarUrl} alt={profile.displayName} className="h-9 w-9 rounded-full object-cover ring-2 ring-rose-300" /></button> : <UserRound className="h-7 w-7 text-white/50" />}</div></div></header>
 
-      <div className="mx-auto max-w-6xl px-4 py-5">
-        {activeTab === 'home' && <HomeView people={people} onOpenRoom={() => setActiveTab('party')} onInvite={() => setInviteOpen(true)} onTheme={() => setRoomTheme((roomTheme + 1) % roomThemes.length)} />}
-        {activeTab === 'party' && <PartyView theme={theme} roomName={roomName} roomId={roomId} hostMode={hostMode} joinedSeats={joinedSeats} activeGame={activeGame} roomMenuOpen={roomMenuOpen} onBack={() => setActiveTab('home')} onHost={() => setHostMode((value) => !value)} onSeat={joinSeat} onGame={setActiveGame} onMenu={() => setRoomMenuOpen((value) => !value)} onInvite={() => setInviteOpen(true)} onGift={(gift) => sendGift(gift)} />}
-        {activeTab === 'chat' && <ChatView people={people} onGift={(gift, target) => sendGift(gift, target)} coins={wallet.coins} onStore={() => setStoreOpen(true)} />}
-        {activeTab === 'mine' && <MineView profile={profile} wallet={wallet} onRecharge={() => setRechargeOpen(true)} onSignOut={onSignOut} />}
+      <div className="mx-auto max-w-6xl px-4 py-6">
+        {activeTab === 'home' && <HomeView people={people} onRoom={() => { setActiveTab('party'); void startMedia('voice'); }} onProfile={selectProfile} onInvite={() => setInviteOpen(true)} />}
+        {activeTab === 'party' && <PartyView roomName={roomName} setRoomName={setRoomName} roomId={roomId} theme={roomThemes[roomTheme]} roomMode={roomMode} cameraStream={cameraStream} videoRef={videoRef} mediaError={mediaError} joinedSeats={joinedSeats} micLevels={micLevels} onMode={(mode) => void startMedia(mode)} onSeat={(seat) => setJoinedSeats((current) => current.includes(seat) ? current.filter((item) => item !== seat) : [...current, seat])} onTheme={() => setRoomTheme((roomTheme + 1) % roomThemes.length)} onInvite={() => setInviteOpen(true)} roomChat={roomChat} roomMessage={roomMessage} setRoomMessage={setRoomMessage} onSendMessage={sendRoomMessage} audioFile={audioFile} audioUrl={audioUrl} audioPlaying={audioPlaying} audioRef={audioRef} audioVolume={audioVolume} onVolume={setAudioVolume} onFile={handleAudioFile} onToggleAudio={() => void toggleAudio()} youtubeUrl={youtubeUrl} setYoutubeUrl={setYoutubeUrl} youtubeVideoId={youtubeVideoId} setYoutubeVideoId={(value) => setYoutubeVideoId(parseYoutubeId(value))} onGift={(gift) => sendGift(gift)} onOpenProfile={(person) => { setGiftTarget(person); selectProfile(person); }} />}
+        {activeTab === 'chat' && <ChatView people={people} onProfile={selectProfile} onGift={(gift, target) => sendGift(gift, target)} onRoom={() => { setActiveTab('party'); void startMedia('voice'); }} coins={wallet.coins} />}
+        {activeTab === 'mine' && <MineView profile={profile} wallet={wallet} onRecharge={() => setRechargeOpen(true)} onProfile={() => profile && selectProfile(profile)} onSignOut={onSignOut} />}
       </div>
 
       <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-[#171326]/95 px-3 py-2 backdrop-blur-xl"><div className="mx-auto grid max-w-lg grid-cols-4 gap-1">{tabs.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setActiveTab(id)} className={`flex flex-col items-center gap-1 rounded-xl py-2 text-[11px] font-bold ${activeTab === id ? 'bg-rose-500/15 text-rose-300' : 'text-white/45'}`}><Icon className="h-5 w-5" />{label}</button>)}</div></nav>
-
-      <CoinStoreModal open={storeOpen} onClose={() => setStoreOpen(false)} onPurchase={buyCoins} />
-      <RechargeModal open={rechargeOpen} onClose={() => setRechargeOpen(false)} onPurchase={() => { buyCoins(1000); setRechargeOpen(false); }} />
+      <RechargeModal open={rechargeOpen} onClose={() => setRechargeOpen(false)} onPurchase={buyRecharge} />
       <InviteSheet open={inviteOpen} onClose={() => setInviteOpen(false)} people={people} />
-      <GiftOverlay gift={selectedGift} onClose={() => setSelectedGift(null)} />
+      <GiftOverlay gift={activeGift} onClose={() => setActiveGift(null)} />
+      <ProfileModal profile={selectedProfile} onClose={() => setSelectedProfile(null)} onGift={(gift) => selectedProfile && sendGift(gift, selectedProfile)} onChat={() => { setSelectedProfile(null); setActiveTab('chat'); }} />
     </main>
   );
 }
 
-function HomeView({ people, onOpenRoom, onInvite, onTheme }: { people: SocialProfile[]; onOpenRoom: () => void; onInvite: () => void; onTheme: () => void }) {
-  return <div className="space-y-6"><div className="flex items-end justify-between"><div><p className="text-xs font-black uppercase tracking-[0.2em] text-rose-300">Home · For you</p><h1 className="mt-2 text-3xl font-black">Find your room.</h1></div><button onClick={onInvite} className="rounded-full bg-white/10 p-3 text-white/70"><Share2 className="h-4 w-4" /></button></div><div className="flex gap-2 overflow-x-auto pb-1">{['Related', 'Explore', 'Event'].map((item, index) => <button key={item} className={`whitespace-nowrap rounded-full px-4 py-2 text-xs font-black ${index === 0 ? 'bg-white text-[#171326]' : 'bg-white/10 text-white/60'}`}>{item}</button>)}</div><div className="grid gap-4 md:grid-cols-3">{roomThemes.map((theme, index) => <button key={theme.name} onClick={index === 0 ? onOpenRoom : onTheme} className={`group relative min-h-48 overflow-hidden rounded-3xl bg-gradient-to-br ${theme.colors} p-5 text-left shadow-xl`}><div className="absolute -right-5 -top-5 text-8xl opacity-30 transition group-hover:scale-110">{theme.icon}</div><div className="relative flex h-full flex-col justify-end"><span className="text-3xl">{theme.icon}</span><h2 className="mt-4 text-xl font-black">{theme.name}</h2><p className="mt-1 text-xs text-white/70">{12 + index * 9} people · All on mic</p></div></button>)}</div><section><div className="mb-3 flex items-center justify-between"><h2 className="text-xl font-black">People you may like</h2><button className="text-xs font-bold text-rose-300">See all</button></div><div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{people.slice(0, 4).map((person) => <div key={person.id} className="overflow-hidden rounded-2xl bg-white/5 ring-1 ring-white/10"><div className="flex h-32 items-center justify-center bg-gradient-to-br from-violet-700 to-rose-500">{person.avatarUrl ? <img src={person.avatarUrl} alt={person.displayName} className="h-full w-full object-cover" /> : <UserRound className="h-10 w-10 text-white/60" />}</div><div className="p-3"><p className="truncate text-sm font-bold">{person.displayName}</p><p className="mt-1 text-[10px] text-white/45">{person.city || 'Nearby'} · online</p></div></div>)}</div></section></div>;
-}
+function HomeView({ people, onRoom, onProfile, onInvite }: { people: SocialProfile[]; onRoom: () => void; onProfile: (person: SocialProfile) => void; onInvite: () => void }) { return <section className="space-y-6"><div className="flex items-end justify-between"><div><p className="text-xs font-black uppercase tracking-[0.2em] text-rose-300">Home · Related</p><h1 className="mt-2 text-3xl font-black">Find your room.</h1><p className="mt-2 text-sm text-white/50">Voice, video, and real-time connection.</p></div><button onClick={onInvite} className="rounded-full bg-white/10 p-3"><Share2 className="h-4 w-4" /></button></div><div className="flex gap-2"><button className="rounded-full bg-white px-4 py-2 text-xs font-black text-[#171326]">Related</button><button onClick={onRoom} className="rounded-full bg-white/10 px-4 py-2 text-xs font-bold text-white/60">Explore rooms</button><button className="rounded-full bg-white/10 px-4 py-2 text-xs font-bold text-white/60">Event</button></div><button onClick={onRoom} className="w-full rounded-3xl bg-gradient-to-br from-rose-600 via-fuchsia-700 to-indigo-950 p-6 text-left shadow-2xl"><div className="flex items-center justify-between"><div><p className="text-xs font-black uppercase tracking-widest text-white/60">Live now</p><h2 className="mt-2 text-2xl font-black">Midnight Voice Lounge</h2><p className="mt-2 text-sm text-white/70">Join the conversation · 128 listeners</p></div><div className="rounded-2xl bg-white/15 p-4"><Radio className="h-8 w-8" /></div></div></button><section><div className="mb-3 flex items-center justify-between"><h2 className="text-xl font-black">People nearby</h2><span className="text-xs text-white/40">Tap a profile</span></div><div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{people.slice(0, 8).map((person) => <button key={person.id} onClick={() => onProfile(person)} className="overflow-hidden rounded-2xl bg-white/5 text-left ring-1 ring-white/10"><div className="flex h-32 items-center justify-center bg-gradient-to-br from-violet-700 to-rose-500">{person.avatarUrl ? <img src={person.avatarUrl} alt={person.displayName} className="h-full w-full object-cover" /> : <UserRound className="h-10 w-10 text-white/50" />}</div><div className="p-3"><p className="truncate text-sm font-bold">{person.displayName}</p><p className="mt-1 text-[10px] text-white/45">{person.views} views · {person.likes} likes</p></div></button>)}</div></section></section>; }
 
-function PartyView({ theme, roomName, roomId, hostMode, joinedSeats, activeGame, roomMenuOpen, onBack, onHost, onSeat, onGame, onMenu, onInvite, onGift }: { theme: typeof roomThemes[number]; roomName: string; roomId: string; hostMode: boolean; joinedSeats: number[]; activeGame: string; roomMenuOpen: boolean; onBack: () => void; onHost: () => void; onSeat: (seat: number) => void; onGame: (game: string) => void; onMenu: () => void; onInvite: () => void; onGift: (gift: Gift) => void }) {
-  return <div className="space-y-4"><div className={`relative overflow-hidden rounded-[2rem] bg-gradient-to-br ${theme.colors} p-4 shadow-2xl`}><div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(255,255,255,.2),transparent_35%)]" /><div className="relative flex items-center justify-between"><button onClick={onBack} className="rounded-full bg-black/20 p-2"><ChevronLeft className="h-5 w-5" /></button><div className="text-center"><p className="text-[10px] font-bold uppercase tracking-widest text-white/60">Voice room</p><h1 className="font-black">{roomName}</h1><p className="text-[10px] text-white/60">ID {roomId} · 128 online</p></div><div className="flex gap-2"><button onClick={onInvite} className="rounded-full bg-black/20 p-2"><Share2 className="h-4 w-4" /></button><button onClick={onMenu} className="rounded-full bg-black/20 p-2"><MoreHorizontal className="h-4 w-4" /></button></div></div><div className="relative mt-6 grid grid-cols-5 gap-2">{seats.map((seat) => <button key={seat} onClick={() => onSeat(seat)} className={`aspect-square rounded-2xl border text-center transition ${joinedSeats.includes(seat) ? 'border-amber-300 bg-amber-300/20 shadow-lg shadow-amber-900/20' : 'border-white/15 bg-black/15 hover:bg-white/10'}`}><div className={`mx-auto flex h-9 w-9 items-center justify-center rounded-full ${joinedSeats.includes(seat) ? 'bg-amber-300 text-amber-950' : 'bg-white/10 text-white/45'}`}>{joinedSeats.includes(seat) ? <Mic className="h-4 w-4" /> : <span className="text-xs font-black">{seat}</span>}</div><p className="mt-1 text-[9px] font-bold text-white/55">{joinedSeats.includes(seat) ? 'On mic' : 'Join'}</p></button>)}</div><div className="relative mt-4 flex items-center justify-between rounded-2xl bg-black/20 px-4 py-3"><div><p className="text-xs font-black">{hostMode ? 'You are hosting' : 'All on Mic'}</p><p className="text-[10px] text-white/55">Tap a seat to join the conversation</p></div><button onClick={onHost} className="rounded-xl bg-white px-3 py-2 text-xs font-black text-gray-900">{hostMode ? 'Stop host' : 'Host room'}</button></div>{roomMenuOpen && <div className="absolute right-4 top-16 z-10 w-44 rounded-2xl border border-white/10 bg-[#241d39] p-2 shadow-2xl"><button className="flex w-full items-center gap-2 rounded-xl p-3 text-left text-xs font-bold hover:bg-white/10"><Settings className="h-4 w-4" />Room settings</button><button className="flex w-full items-center gap-2 rounded-xl p-3 text-left text-xs font-bold hover:bg-white/10"><ShieldCheck className="h-4 w-4" />Room rules</button></div>}</div><div className="rounded-3xl bg-white/5 p-4 ring-1 ring-white/10"><div className="mb-3 flex items-center justify-between"><div><p className="text-xs font-black uppercase tracking-widest text-rose-300">Play center</p><h2 className="mt-1 text-xl font-black">Make the room move</h2></div><button className="rounded-full bg-white/10 p-2"><Palette className="h-4 w-4" /></button></div><div className="grid grid-cols-5 gap-2">{[['Music', Music2], ['Lucky Wheel', Trophy], ['Calculator', MoreHorizontal], ['Sounds', Zap], ['PK Battle', SwordsIcon]].map(([label, Icon]) => <button key={String(label)} className="rounded-2xl bg-white/5 p-3 text-center hover:bg-white/10"><IconRenderer icon={Icon as typeof Music2} /><span className="mt-2 block text-[10px] font-bold text-white/60">{String(label)}</span></button>)}</div><div className="mt-4 flex gap-2 overflow-x-auto">{gamesForDisplay.map((game) => <button key={game.name} onClick={() => onGame(game.name)} className={`whitespace-nowrap rounded-full px-3 py-2 text-[10px] font-black ${activeGame === game.name ? 'bg-rose-500 text-white' : 'bg-white/10 text-white/60'}`}>{game.emoji} {game.name}</button>)}</div>{activeGame && <div className="mt-3 rounded-2xl bg-rose-500/15 p-3 text-xs font-bold text-rose-100">{activeGame} is ready. Invite the room to play.</div>}</div><div className="rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4"><p className="text-sm font-black text-amber-100">Room rules</p><p className="mt-2 text-xs leading-5 text-white/60">No abusive language · No personal attacks · Respect every voice.</p><button onClick={onInvite} className="mt-3 flex items-center gap-2 text-xs font-black text-amber-200"><Share2 className="h-3.5 w-3.5" />Share your room to others</button></div><GiftPanelMini onGift={onGift} /></div>;
-}
+function PartyView(props: { roomName: string; setRoomName: (value: string) => void; roomId: string; theme: string; roomMode: RoomMode; cameraStream: MediaStream | null; videoRef: React.RefObject<HTMLVideoElement>; mediaError: string; joinedSeats: number[]; micLevels: number[]; onMode: (mode: RoomMode) => void; onSeat: (seat: number) => void; onTheme: () => void; onInvite: () => void; roomChat: ChatMessage[]; roomMessage: string; setRoomMessage: (value: string) => void; onSendMessage: (event: React.FormEvent) => void; audioFile: File | null; audioUrl: string; audioPlaying: boolean; audioRef: React.RefObject<HTMLAudioElement>; audioVolume: number; onVolume: (value: number) => void; onFile: (file: File | undefined) => void; onToggleAudio: () => void; youtubeUrl: string; setYoutubeUrl: (value: string) => void; youtubeVideoId: string; setYoutubeVideoId: (value: string) => void; onGift: (gift: Gift) => void; onOpenProfile: (person: SocialProfile) => void }) { const modeButtons: [RoomMode, string][] = [['voice', 'Voice Party'], ['video', 'Video Party'], ['live', 'Live Stream']]; return <section className="space-y-4"><div className={`relative overflow-hidden rounded-[2rem] bg-gradient-to-br ${props.theme} p-4 shadow-2xl`}><div className="flex items-center justify-between"><button className="rounded-full bg-black/20 p-2"><ChevronLeft className="h-5 w-5" /></button><div className="text-center"><p className="text-[10px] font-black uppercase tracking-widest text-white/60">{props.roomMode} room</p><h1 className="font-black">{props.roomName}</h1><p className="text-[10px] text-white/60">ID {props.roomId} · 128 online</p></div><div className="flex gap-2"><button onClick={props.onInvite} className="rounded-full bg-black/20 p-2"><Share2 className="h-4 w-4" /></button><button onClick={props.onTheme} className="rounded-full bg-black/20 p-2"><Crown className="h-4 w-4" /></button></div></div><div className="mt-4 flex gap-2 overflow-x-auto"><input value={props.roomName} onChange={(event) => props.setRoomName(event.target.value)} className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs outline-none" />{modeButtons.map(([mode, label]) => <button key={mode} onClick={() => props.onMode(mode)} className={`whitespace-nowrap rounded-xl px-3 py-2 text-[10px] font-black ${props.roomMode === mode ? 'bg-white text-gray-900' : 'bg-black/20 text-white/70'}`}>{label}</button>)}</div><div className="mt-4 h-60 overflow-hidden rounded-2xl bg-black/30">{props.roomMode !== 'voice' && props.cameraStream ? <video ref={props.videoRef} autoPlay muted playsInline className="h-full w-full object-cover" /> : <div className="flex h-full flex-col items-center justify-center gap-2 text-white/45"><Mic className="h-10 w-10" /><span className="text-xs">Voice room · microphone active</span></div>}</div>{props.mediaError && <p className="mt-2 text-xs text-amber-200">{props.mediaError}</p>}<div className="mt-4 grid grid-cols-5 gap-2">{seats.map((seat) => <button key={seat} onClick={() => props.onSeat(seat)} className={`rounded-xl border p-2 ${props.joinedSeats.includes(seat) ? 'border-amber-300 bg-amber-300/20' : 'border-white/10 bg-black/15'}`}><div className="mx-auto flex h-9 w-9 items-center justify-center rounded-full bg-white/10">{props.joinedSeats.includes(seat) ? <Mic className="h-4 w-4 text-amber-200" /> : <span className="text-xs text-white/50">{seat}</span>}</div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-emerald-400 transition-all" style={{ width: `${props.micLevels[seat - 1] || 0}%` }} /></div></button>)}</div></div><MediaHub {...props} /><div className="grid gap-4 lg:grid-cols-2"><RoomChat messages={props.roomChat} message={props.roomMessage} setMessage={props.setRoomMessage} onSend={props.onSendMessage} /><GiftPanel gifts={gifts} onGift={props.onGift} onOpenProfile={props.onOpenProfile} /></div></section>; }
 
-function ChatView({ people, onGift, coins, onStore }: { people: SocialProfile[]; onGift: (gift: Gift, target: SocialProfile) => void; coins: number; onStore: () => void }) { const [selected, setSelected] = useState<SocialProfile | null>(people[0] || null); const [text, setText] = useState(''); return <div className="space-y-5"><div><p className="text-xs font-black uppercase tracking-[0.2em] text-rose-300">Connect</p><h1 className="mt-2 text-3xl font-black">Chat & messages</h1></div><div className="grid gap-4 md:grid-cols-[.7fr_1.3fr]"><div className="space-y-2 rounded-3xl bg-white/5 p-3 ring-1 ring-white/10"><div className="grid grid-cols-2 gap-2 p-1"><button className="rounded-xl bg-white/10 py-2 text-xs font-black">Messages</button><button className="rounded-xl py-2 text-xs font-bold text-white/45">Voice Party</button></div>{people.slice(0, 6).map((person) => <button key={person.id} onClick={() => setSelected(person)} className={`flex w-full items-center gap-3 rounded-2xl p-3 text-left ${selected?.id === person.id ? 'bg-rose-500/15' : 'hover:bg-white/5'}`}><div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-rose-500"><UserRound className="h-4 w-4" /></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{person.displayName}</p><p className="text-[10px] text-white/40">Online now</p></div><MessageCircle className="h-4 w-4 text-white/30" /></button>)}</div><div className="rounded-3xl bg-white/5 p-5 ring-1 ring-white/10">{selected ? <><div className="flex items-center gap-3 border-b border-white/10 pb-4"><div className="flex h-11 w-11 items-center justify-center rounded-full bg-rose-500"><UserRound className="h-5 w-5" /></div><div><p className="font-black">{selected.displayName}</p><p className="text-xs text-emerald-300">Active in voice party</p></div></div><div className="flex h-48 flex-col justify-end gap-2 py-4"><div className="max-w-[78%] rounded-2xl rounded-bl-sm bg-white/10 p-3 text-sm text-white/75">Hey! Join my voice room tonight 🎧</div>{text && <div className="max-w-[78%] self-end rounded-2xl rounded-br-sm bg-rose-500 p-3 text-sm">{text}</div>}</div><GiftPanelMini onGift={(gift) => onGift(gift, selected)} /><div className="mt-3 flex gap-2"><input value={text} onChange={(event) => setText(event.target.value)} placeholder="Write a message..." className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/15 px-3 py-3 text-sm outline-none focus:border-rose-400" /><button onClick={() => setText('')} className="rounded-xl bg-rose-500 px-4"><Send className="h-4 w-4" /></button></div><button onClick={onStore} className="mt-3 flex items-center gap-2 text-xs font-bold text-amber-200"><Coins className="h-4 w-4" />{coins} coins · open store</button></> : <div className="flex h-full items-center justify-center text-sm text-white/45">Choose someone to chat with.</div>}</div></div></div>; }
+function MediaHub(props: any) { return <section className="grid gap-4 lg:grid-cols-2"><div className="rounded-3xl bg-white/5 p-4 ring-1 ring-white/10"><div className="flex items-center justify-between"><div><p className="text-xs font-black uppercase tracking-widest text-rose-300">Room music</p><h2 className="mt-1 font-black">Local audio player</h2></div><Music2 className="text-rose-300" /></div><input type="file" accept="audio/mpeg,audio/mp3,audio/*" onChange={(event) => props.onFile(event.target.files?.[0])} className="mt-4 block w-full text-xs text-white/55 file:mr-3 file:rounded-lg file:border-0 file:bg-rose-500 file:px-3 file:py-2 file:text-xs file:font-bold file:text-white" />{props.audioUrl && <><audio ref={props.audioRef} src={props.audioUrl} loop onEnded={() => undefined} /><div className="mt-3 flex items-center gap-3"><button onClick={props.onToggleAudio} className="rounded-full bg-rose-500 p-3">{props.audioPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}</button><span className="min-w-0 flex-1 truncate text-xs font-bold">{props.audioFile?.name}</span><Volume2 className="h-4 w-4 text-white/50" /><input type="range" min="0" max="1" step=".05" value={props.audioVolume} onChange={(event) => { props.onVolume(Number(event.target.value)); if (props.audioRef.current) props.audioRef.current.volume = Number(event.target.value); }} className="w-20 accent-rose-500" /></div></>}</div><div className="rounded-3xl bg-white/5 p-4 ring-1 ring-white/10"><div className="flex items-center justify-between"><div><p className="text-xs font-black uppercase tracking-widest text-red-300">Video party</p><h2 className="mt-1 font-black">YouTube stream</h2></div><Youtube className="text-red-400" /></div><div className="mt-4 flex gap-2"><input value={props.youtubeUrl} onChange={(event) => props.setYoutubeUrl(event.target.value)} placeholder="Paste a YouTube URL" className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-xs outline-none" /><button onClick={() => props.setYoutubeVideoId(props.youtubeUrl)} className="rounded-xl bg-red-500 px-3 text-xs font-black">Play</button></div>{props.youtubeVideoId && <iframe title="YouTube room video" className="mt-3 h-40 w-full rounded-2xl" src={`https://www.youtube.com/embed/${props.youtubeVideoId}?autoplay=1&enablejsapi=1`} allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen />}</div></section>; }
 
-function MineView({ profile, wallet, onRecharge, onSignOut }: { profile: SocialProfile | null; wallet: WalletState; onRecharge: () => void; onSignOut: () => void }) { return <div className="space-y-6"><div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-violet-800 via-fuchsia-700 to-rose-500 p-6"><div className="absolute -right-8 -top-12 text-[10rem] opacity-15">👑</div><div className="relative flex items-center gap-4">{profile?.avatarUrl ? <img src={profile.avatarUrl} alt={profile.displayName} className="h-20 w-20 rounded-3xl object-cover ring-4 ring-white/20" /> : <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-white/15"><UserRound className="h-9 w-9" /></div>}<div><p className="text-2xl font-black">{profile?.displayName || 'Your profile'}</p><p className="mt-1 text-xs text-white/70">Noble level 3 · VIP member</p><div className="mt-2 flex gap-2"><span className="rounded-full bg-amber-300 px-2 py-1 text-[10px] font-black text-amber-950">NOBLE 3</span><span className="rounded-full bg-white/15 px-2 py-1 text-[10px] font-black">VIP</span></div></div></div></div><div className="grid grid-cols-3 gap-3">{[['Diamonds', wallet.purchasedCoins * 10, 'text-violet-300', Crown], ['Coins', wallet.coins, 'text-amber-300', Coins], ['Crowns', Math.floor(wallet.purchasedCoins / 10), 'text-yellow-300', Trophy]].map(([label, value, color, Icon]) => <div key={String(label)} className="rounded-2xl bg-white/5 p-4 ring-1 ring-white/10"><IconRenderer icon={Icon as typeof Coins} className={String(color)} /><p className="mt-3 text-xl font-black">{String(value)}</p><p className="text-[10px] font-bold text-white/45">{String(label)}</p></div>)}</div><div className="grid gap-3 sm:grid-cols-2"><button onClick={onRecharge} className="flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 py-4 text-sm font-black text-black"><Wallet className="h-5 w-5" />Wallet & recharge</button><button className="flex items-center justify-center gap-2 rounded-2xl bg-white/10 py-4 text-sm font-black"><Sparkles className="h-5 w-5 text-rose-300" />My moments</button></div><div className="rounded-3xl bg-white/5 p-5 ring-1 ring-white/10"><h2 className="font-black">Your benefits</h2><div className="mt-4 grid grid-cols-3 gap-3 text-center text-xs text-white/55"><div><Trophy className="mx-auto mb-2 h-5 w-5 text-amber-300" />Noble rewards</div><div><MessageCircle className="mx-auto mb-2 h-5 w-5 text-rose-300" />Chat bubbles</div><div><Palette className="mx-auto mb-2 h-5 w-5 text-violet-300" />Profile frames</div></div></div><button onClick={onSignOut} className="w-full rounded-xl border border-white/10 py-3 text-sm font-bold text-white/50">Sign out</button></div>; }
+function RoomChat({ messages, message, setMessage, onSend }: { messages: ChatMessage[]; message: string; setMessage: (value: string) => void; onSend: (event: React.FormEvent) => void }) { return <div className="rounded-3xl bg-white/5 p-4 ring-1 ring-white/10"><div className="flex items-center justify-between"><h2 className="font-black">Room chat</h2><MessageCircle className="h-4 w-4 text-rose-300" /></div><div className="mt-3 h-40 space-y-2 overflow-y-auto rounded-2xl bg-black/15 p-3">{messages.length ? messages.map((item) => <p key={item.id} className="text-xs"><strong className="text-rose-300">{item.senderName}: </strong><span className="text-white/75">{item.body}</span></p>) : <p className="text-xs text-white/40">Be the first to say hello.</p>}</div><form onSubmit={onSend} className="mt-3 flex gap-2"><input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Write a comment..." className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-xs outline-none" /><button className="rounded-xl bg-rose-500 px-3"><Send className="h-4 w-4" /></button></form></div>; }
 
-function GiftPanelMini({ onGift }: { onGift: (gift: Gift) => void }) { const [open, setOpen] = useState(false); return <div className="rounded-2xl bg-amber-300/10 p-3"><div className="flex items-center justify-between"><p className="flex items-center gap-2 text-xs font-black text-amber-100"><Gift className="h-4 w-4" />Premium gifts</p><button onClick={() => setOpen((value) => !value)} className="rounded-full bg-amber-300 px-3 py-1 text-[10px] font-black text-amber-950">{open ? 'Close' : 'Open panel'}</button></div>{open && <div className="mt-3 grid grid-cols-4 gap-2">{gifts.slice(0, 8).map((gift) => <button key={gift.name} onClick={() => onGift(gift)} className="rounded-xl bg-white/10 p-2 text-center hover:bg-rose-500/30"><span className="text-2xl">{gift.emoji}</span><span className="mt-1 block truncate text-[9px] font-bold">{gift.name}</span><span className="text-[9px] text-amber-200">{gift.price}</span></button>)}</div>}</div>; }
-function CoinStoreModal({ open, onClose, onPurchase }: { open: boolean; onClose: () => void; onPurchase: (coins: number, price: number) => void }) { if (!open) return null; return <Modal title="Coin store" onClose={onClose}><div className="space-y-3">{[[50, 50], [100, 100], [500, 500]].map(([coins, price]) => <button key={coins} onClick={() => onPurchase(coins, price)} className="flex w-full items-center justify-between rounded-2xl border border-amber-200/20 bg-amber-300/10 p-4 text-left hover:bg-amber-300/20"><span className="flex items-center gap-3"><Coins className="h-6 w-6 text-amber-300" /><span><b className="block">{coins} Coins</b><small className="text-white/45">Instant local wallet credit</small></span></span><b className="text-amber-200">₹{price}</b></button>)}</div></Modal>; }
-function RechargeModal({ open, onClose, onPurchase }: { open: boolean; onClose: () => void; onPurchase: () => void }) { if (!open) return null; return <Modal title="Big recharge bonus" onClose={onClose}><div className="rounded-3xl bg-gradient-to-br from-amber-300 via-orange-500 to-rose-600 p-5 text-center text-black"><p className="text-xs font-black uppercase tracking-widest">Limited-time bonus</p><p className="mt-2 text-5xl font-black">00:58:53</p><p className="mt-2 text-sm font-bold">Recharge 1,000 diamonds</p><button onClick={onPurchase} className="mt-5 w-full rounded-2xl bg-black py-4 text-lg font-black text-amber-200">INR 57 · Recharge now</button></div><div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs"><div className="rounded-2xl bg-white/5 p-3"><Crown className="mx-auto mb-2 text-amber-300" />1 day crown</div><div className="rounded-2xl bg-white/5 p-3"><MessageCircle className="mx-auto mb-2 text-rose-300" />2 day bubbles</div><div className="rounded-2xl bg-white/5 p-3"><Palette className="mx-auto mb-2 text-violet-300" />3 day frame</div></div></Modal>; }
-function InviteSheet({ open, onClose, people }: { open: boolean; onClose: () => void; people: SocialProfile[] }) { if (!open) return null; return <div className="fixed inset-0 z-[75] flex items-end bg-black/60"><motion.div initial={{ y: '100%' }} animate={{ y: 0 }} className="w-full rounded-t-[2rem] bg-[#201a31] p-6"><div className="mx-auto max-w-2xl"><div className="flex items-center justify-between"><h2 className="text-2xl font-black">Invite friends</h2><button onClick={onClose} className="rounded-full bg-white/10 p-2"><X /></button></div><div className="mt-5 grid grid-cols-4 gap-3 text-center text-xs font-bold"><ShareButton label="WhatsApp" icon="🟢" /><ShareButton label="Facebook" icon="🔵" /><ShareButton label="Instagram" icon="🌈" /><ShareButton label="Moment" icon="✨" /></div><div className="mt-6 flex gap-2 border-b border-white/10 pb-3 text-xs font-black"><span className="border-b-2 border-rose-400 pb-3 text-rose-300">Recently</span><span className="text-white/45">Friends</span><span className="text-white/45">Followers</span></div><div className="mt-3 space-y-2">{people.slice(0, 4).map((person) => <div key={person.id} className="flex items-center gap-3 rounded-xl bg-white/5 p-3"><div className="h-9 w-9 rounded-full bg-rose-500" /><span className="flex-1 text-sm font-bold">{person.displayName}</span><button className="rounded-lg bg-rose-500 px-3 py-2 text-xs font-black">Share</button></div>)}</div></div></motion.div></div>; }
-function ShareButton({ label, icon }: { label: string; icon: string }) { return <button className="rounded-2xl bg-white/5 p-3 hover:bg-white/10"><span className="text-2xl">{icon}</span><span className="mt-2 block text-[10px] text-white/60">{label}</span></button>; }
-function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) { return <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"><motion.section initial={{ scale: .92, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="w-full max-w-md rounded-3xl bg-[#211a32] p-6 shadow-2xl ring-1 ring-white/10"><div className="flex items-center justify-between"><h2 className="text-2xl font-black">{title}</h2><button onClick={onClose} className="rounded-full bg-white/10 p-2"><X /></button></div><div className="mt-5">{children}</div></motion.section></div>; }
-function GiftOverlay({ gift, onClose }: { gift: Gift | null; onClose: () => void }) { return <AnimatePresence>{gift && <motion.div className="fixed inset-0 z-[90] flex items-center justify-center overflow-hidden bg-black/70" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>{Array.from({ length: 20 }).map((_, index) => <motion.span key={index} className="absolute text-3xl" initial={{ x: 0, y: 0, opacity: 1 }} animate={{ x: Math.cos(index) * (100 + index * 13), y: Math.sin(index) * (100 + index * 11), opacity: 0, rotate: 360 }} transition={{ duration: 1.4, delay: index * .02 }}>{index % 2 ? '✨' : gift.emoji}</motion.span>)}<motion.div initial={{ scale: .1, y: 120, rotate: -18 }} animate={{ scale: [ .1, 1.3, 1 ], y: 0, rotate: [ -18, 8, 0 ] }} transition={{ type: 'spring', bounce: .45, duration: 1 }} className="text-center"><div className="text-[9rem] drop-shadow-2xl">{gift.emoji}</div><p className="text-3xl font-black">{gift.name} sent!</p><p className="mt-2 text-sm text-white/60">A premium moment just landed in the room.</p></motion.div><button onClick={onClose} className="absolute right-5 top-5 rounded-full bg-white/10 p-3"><X /></button></motion.div>}</AnimatePresence>; }
-function GiftPanelMiniUnused() { return null; }
-function IconRenderer({ icon: Icon, className = '' }: { icon: React.ComponentType<{ className?: string }>; className?: string }) { return <Icon className={`mx-auto h-5 w-5 ${className}`} />; }
-function SwordsIcon({ className = '' }: { className?: string }) { return <Zap className={className} />; }
+function GiftPanel({ gifts: options, onGift, onOpenProfile }: { gifts: Gift[]; onGift: (gift: Gift) => void; onOpenProfile: (person: SocialProfile) => void }) { return <div className="rounded-3xl bg-amber-300/10 p-4 ring-1 ring-amber-200/10"><div className="flex items-center justify-between"><h2 className="flex items-center gap-2 font-black"><Gift className="h-4 w-4 text-amber-300" />Animated gifts</h2><span className="text-xs text-amber-200">Car · Crown · Bike · Rose</span></div><div className="mt-4 grid grid-cols-4 gap-2">{options.map((gift) => <button key={gift.name} onClick={() => onGift(gift)} className="rounded-2xl bg-white/10 p-3 text-center transition hover:-translate-y-1 hover:bg-rose-500/20"><div className="text-3xl">{gift.emoji}</div><p className="mt-1 text-[10px] font-black">{gift.name}</p><p className="text-[10px] text-amber-200">{gift.price} 💎</p></button>)}</div><button onClick={() => onOpenProfile({ id: 'room-host', age: null, gender: '', city: 'Live room', bio: '', interests: [], avatarUrl: '', latitude: null, longitude: null, matchDistance: 25, displayName: 'Room host', likes: 18, views: 247 })} className="mt-3 text-xs font-bold text-amber-200">Open room host profile</button></div>; }
+
+function ChatView({ people, onProfile, onGift, onRoom, coins }: { people: SocialProfile[]; onProfile: (person: SocialProfile) => void; onGift: (gift: Gift, target: SocialProfile) => void; onRoom: () => void; coins: number }) { const [selected, setSelected] = useState<SocialProfile | null>(people[0] || null); const [text, setText] = useState(''); return <section className="space-y-5"><div className="flex items-end justify-between"><div><p className="text-xs font-black uppercase tracking-[0.2em] text-rose-300">Connect</p><h1 className="mt-2 text-3xl font-black">Chat & voice party</h1></div><button onClick={onRoom} className="flex items-center gap-2 rounded-xl bg-rose-500 px-3 py-2 text-xs font-black"><Radio className="h-4 w-4" />Voice Party</button></div><div className="grid gap-4 lg:grid-cols-[.7fr_1.3fr]"><div className="rounded-3xl bg-white/5 p-3 ring-1 ring-white/10">{people.slice(0, 8).map((person) => <button key={person.id} onClick={() => setSelected(person)} className="flex w-full items-center gap-3 rounded-2xl p-3 text-left hover:bg-white/10"><button onClick={(event) => { event.stopPropagation(); onProfile(person); }} className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-rose-500"><UserRound className="h-4 w-4" /></button><span className="flex-1 truncate text-sm font-bold">{person.displayName}</span><MessageCircle className="h-4 w-4 text-white/30" /></button>)}</div><div className="rounded-3xl bg-white/5 p-5 ring-1 ring-white/10">{selected ? <><button onClick={() => onProfile(selected)} className="flex items-center gap-3 text-left"><div className="flex h-11 w-11 items-center justify-center rounded-full bg-rose-500"><UserRound /></div><span><strong className="block">{selected.displayName}</strong><small className="text-emerald-300">Active now</small></span></button><div className="flex h-40 flex-col justify-end gap-2 py-4"><p className="max-w-[80%] rounded-2xl bg-white/10 p-3 text-sm">Want to join the voice party?</p>{text && <p className="max-w-[80%] self-end rounded-2xl bg-rose-500 p-3 text-sm">{text}</p>}</div><GiftPanel gifts={gifts} onGift={(gift) => onGift(gift, selected)} onOpenProfile={onProfile} /><div className="mt-3 flex gap-2"><input value={text} onChange={(event) => setText(event.target.value)} placeholder="Write a message..." className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/20 px-3 py-3 text-sm outline-none" /><button onClick={() => setText('')} className="rounded-xl bg-rose-500 px-4"><Send className="h-4 w-4" /></button></div><p className="mt-3 text-xs text-amber-200">💎 {coins} coins available for gifts</p></> : <p className="text-sm text-white/50">Choose someone to chat with.</p>}</div></div></section>; }
+
+function MineView({ profile, wallet, onRecharge, onProfile, onSignOut }: { profile: SocialProfile | null; wallet: WalletState; onRecharge: () => void; onProfile: () => void; onSignOut: () => void }) { return <section className="space-y-5"><button onClick={onProfile} className="flex w-full items-center gap-4 rounded-3xl bg-gradient-to-br from-violet-800 via-fuchsia-700 to-rose-600 p-6 text-left"><div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-3xl bg-white/15">{profile?.avatarUrl ? <img src={profile.avatarUrl} alt={profile.displayName} className="h-full w-full object-cover" /> : <UserRound className="h-9 w-9" />}</div><div><h1 className="text-2xl font-black">{profile?.displayName || 'Your profile'}</h1><p className="mt-1 text-xs text-white/70">Noble level 3 · VIP profile</p><span className="mt-2 inline-block rounded-full bg-amber-300 px-2 py-1 text-[10px] font-black text-amber-950">NOBLE 3</span></div></button><div className="grid grid-cols-3 gap-3">{[['Diamonds', wallet.purchasedCoins * 10, Crown], ['Coins', wallet.coins, Coins], ['Gifts received', wallet.receivedGifts.length, Gift]].map(([label, value, Icon]) => <div key={String(label)} className="rounded-2xl bg-white/5 p-4 ring-1 ring-white/10"><IconRenderer icon={Icon as typeof Coins} /><p className="mt-3 text-xl font-black">{String(value)}</p><p className="text-[10px] font-bold text-white/45">{String(label)}</p></div>)}</div><button onClick={onRecharge} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 py-4 font-black text-black"><Wallet className="h-5 w-5" />Big recharge bonus</button><div className="rounded-3xl bg-white/5 p-5 ring-1 ring-white/10"><h2 className="font-black">User Moments</h2><div className="mt-4 flex h-28 items-center justify-center rounded-2xl border border-dashed border-white/15 text-xs text-white/40">Your moments will appear here.</div></div><button onClick={onSignOut} className="w-full rounded-xl border border-white/10 py-3 text-sm font-bold text-white/50">Sign out</button></section>; }
+
+function RechargeModal({ open, onClose, onPurchase }: { open: boolean; onClose: () => void; onPurchase: () => void }) { if (!open) return null; return <Modal title="Big recharge bonus" onClose={onClose}><div className="rounded-3xl bg-gradient-to-br from-amber-300 via-orange-500 to-rose-600 p-5 text-center text-black"><p className="text-xs font-black uppercase tracking-widest">Limited-time offer</p><p className="mt-2 text-5xl font-black">00:58:53</p><p className="mt-2 text-sm font-bold">1,000 diamonds + bonus items</p><button onClick={onPurchase} className="mt-5 w-full rounded-2xl bg-black py-4 text-lg font-black text-amber-200">INR 57 · Recharge now</button></div><div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs text-white/60"><div className="rounded-2xl bg-white/5 p-3">👑<br />1 day crown</div><div className="rounded-2xl bg-white/5 p-3">💬<br />2 day bubbles</div><div className="rounded-2xl bg-white/5 p-3">🖼️<br />3 day frame</div></div></Modal>; }
+
+function InviteSheet({ open, onClose, people }: { open: boolean; onClose: () => void; people: SocialProfile[] }) { if (!open) return null; return <div className="fixed inset-0 z-[70] flex items-end bg-black/60"><motion.section initial={{ y: '100%' }} animate={{ y: 0 }} className="w-full rounded-t-[2rem] bg-[#211a32] p-6"><div className="mx-auto max-w-2xl"><div className="flex items-center justify-between"><h2 className="text-2xl font-black">Invite friends</h2><button onClick={onClose}><X /></button></div><div className="mt-5 grid grid-cols-4 gap-3 text-center text-xs font-bold"><span>🟢<br />WhatsApp</span><span>🔵<br />Facebook</span><span>🌈<br />Instagram</span><span>✨<br />Moment</span></div><div className="mt-6 space-y-2">{people.slice(0, 4).map((person) => <div key={person.id} className="flex items-center gap-3 rounded-xl bg-white/5 p-3"><span className="flex-1 text-sm font-bold">{person.displayName}</span><button className="rounded-lg bg-rose-500 px-3 py-2 text-xs font-black">Share</button></div>)}</div></div></motion.section></div>; }
+
+function ProfileModal({ profile, onClose, onGift, onChat }: { profile: SocialProfile | null; onClose: () => void; onGift: (gift: Gift) => void; onChat: () => void }) { if (!profile) return null; return <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4" onClick={onClose}><motion.section initial={{ scale: .9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(event) => event.stopPropagation()} className="w-full max-w-sm rounded-3xl bg-[#241b36] p-5 shadow-2xl"><div className="flex items-start justify-between"><div className="flex items-center gap-3"><div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-violet-600 to-rose-500">{profile.avatarUrl ? <img src={profile.avatarUrl} alt={profile.displayName} className="h-full w-full object-cover" /> : <UserRound />}</div><div><h2 className="text-xl font-black">{profile.displayName}</h2><p className="text-xs text-white/50">{profile.city || 'In the room'}</p></div></div><button onClick={onClose}><X /></button></div><div className="mt-5 grid grid-cols-2 gap-3"><div className="rounded-2xl bg-white/5 p-3"><p className="text-xl font-black">{profile.views}</p><p className="text-xs text-white/45">Views</p></div><div className="rounded-2xl bg-white/5 p-3"><p className="text-xl font-black">{profile.likes}</p><p className="text-xs text-white/45">Likes</p></div></div><div className="mt-4 grid grid-cols-2 gap-2"><button onClick={onChat} className="rounded-xl bg-white/10 py-3 text-xs font-black"><MessageCircle className="mx-auto mb-1 h-4 w-4" />Chat</button><button onClick={() => onGift(gifts[0])} className="rounded-xl bg-rose-500 py-3 text-xs font-black"><Gift className="mx-auto mb-1 h-4 w-4" />Send Gift</button></div></motion.section></div>; }
+
+function GiftOverlay({ gift, onClose }: { gift: Gift | null; onClose: () => void }) { return <AnimatePresence>{gift && <motion.div className="fixed inset-0 z-[90] flex items-center justify-center overflow-hidden bg-black/75" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>{Array.from({ length: 18 }).map((_, index) => <motion.span key={index} className="absolute text-3xl" initial={{ x: 0, y: 0, opacity: 1 }} animate={{ x: Math.cos(index) * (110 + index * 12), y: Math.sin(index) * (100 + index * 11), opacity: 0, rotate: 360 }} transition={{ duration: 1.5, delay: index * .02 }}>{index % 2 ? '✨' : gift.emoji}</motion.span>)}<motion.div initial={{ scale: .1, y: 120, rotate: -15 }} animate={{ scale: [.1, 1.3, 1], y: 0, rotate: [-15, 8, 0] }} transition={{ type: 'spring', bounce: .45, duration: 1 }} className="text-center"><div className="text-[9rem] drop-shadow-2xl">{gift.emoji}</div><p className="text-3xl font-black">{gift.name} sent!</p><p className="mt-2 text-sm text-white/60">A live gift just landed in the room.</p></motion.div><button className="absolute right-5 top-5 rounded-full bg-white/10 p-3"><X /></button></motion.div>}</AnimatePresence>; }
+function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) { return <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4"><motion.section initial={{ scale: .92, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="w-full max-w-md rounded-3xl bg-[#211a32] p-6 shadow-2xl"><div className="flex items-center justify-between"><h2 className="text-2xl font-black">{title}</h2><button onClick={onClose}><X /></button></div><div className="mt-5">{children}</div></motion.section></div>; }
+function IconRenderer({ icon: Icon }: { icon: React.ComponentType<{ className?: string }> }) { return <Icon className="h-5 w-5 text-amber-300" />; }
+function readSwipes(userId: string): Record<string, 'left' | 'right'> { try { return JSON.parse(localStorage.getItem(swipeKey(userId)) || '{}'); } catch { return {}; } }
+function writeSwipes(userId: string, swipes: Record<string, 'left' | 'right'>) { localStorage.setItem(swipeKey(userId), JSON.stringify(swipes)); }
+function readMetrics(userId: string, profileId: string) { try { return JSON.parse(localStorage.getItem(metricKey(userId, profileId)) || '{"views":0,"likes":0}') as { views: number; likes: number }; } catch { return { views: 0, likes: 0 }; } }
+function writeMetrics(userId: string, profileId: string, metrics: { views: number; likes: number }) { localStorage.setItem(metricKey(userId, profileId), JSON.stringify(metrics)); }
