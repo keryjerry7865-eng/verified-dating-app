@@ -7,7 +7,7 @@ import { normalizeProfile, readLocalProfile, type LocalProfile } from '../lib/pr
 import { readWallet, writeWallet, type GiftRecord, type WalletState } from '../lib/wallet';
 import LivePartyRoom from './LivePartyRoom';
 
-type SocialDashboardProps = { session: Session; onSignOut: () => void };
+type SocialDashboardProps = { session: Session; onSignOut: () => void; initialRoomId?: string };
 type SocialProfile = LocalProfile & { displayName: string; likes: number; views: number };
 type Tab = 'home' | 'party' | 'room' | 'chat' | 'mine';
 type RoomMode = 'live' | 'voice' | 'video';
@@ -33,14 +33,14 @@ const getName = (profile: LocalProfile | null, session: Session) => profile?.id 
   ? session.user.user_metadata?.name || session.user.user_metadata?.display_name || session.user.email?.split('@')[0] || 'Member'
   : `Member ${profile?.id.slice(0, 5) || 'guest'}`;
 
-export default function SocialDashboard({ session, onSignOut }: SocialDashboardProps) {
+export default function SocialDashboard({ session, onSignOut, initialRoomId }: SocialDashboardProps) {
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [roomMode, setRoomMode] = useState<RoomMode>('voice');
   const [viewerCount, setViewerCount] = useState(1247);
   const [pendingRoomMode, setPendingRoomMode] = useState<RoomMode | null>(null);
   const [roomTheme, setRoomTheme] = useState(0);
   const [roomName, setRoomName] = useState('Midnight Voice Lounge');
-  const [roomId] = useState('LM-2486');
+  const [roomId] = useState(initialRoomId || 'LM-2486');
   const [people, setPeople] = useState<SocialProfile[]>([]);
   const [profile, setProfile] = useState<SocialProfile | null>(null);
   const [wallet, setWallet] = useState<WalletState>(() => readWallet(session.user.id));
@@ -77,6 +77,16 @@ export default function SocialDashboard({ session, onSignOut }: SocialDashboardP
     window.setTimeout(() => setAlerts((current) => current.filter((item) => item !== message)), 4500);
   };
 
+  const shareRoom = async () => {
+    const roomUrl = `${window.location.origin}/?room=${encodeURIComponent(roomId)}`;
+    try {
+      await navigator.clipboard.writeText(roomUrl);
+      addAlert('Room link copied to clipboard! Share it with your friends.');
+    } catch {
+      addAlert(`Copy failed. Share this room link: ${roomUrl}`);
+    }
+  };
+
   useEffect(() => {
     const interval = window.setInterval(() => {
       setViewerCount((current) => Math.max(1, current + Math.floor(Math.random() * 17) - 8));
@@ -89,6 +99,10 @@ export default function SocialDashboard({ session, onSignOut }: SocialDashboardP
   useEffect(() => {
     if (activeTab === 'party') setActiveTab('room');
   }, [activeTab]);
+
+  useEffect(() => {
+    if (initialRoomId) setActiveTab('room');
+  }, [initialRoomId]);
 
   useEffect(() => {
     const loadPeople = async () => {
@@ -307,6 +321,7 @@ export default function SocialDashboard({ session, onSignOut }: SocialDashboardP
           onSendMessage={sendRoomMessage}
           onModeRequest={(mode) => void startMedia(mode)}
           onBack={() => { stopMedia(); setActiveTab('home'); }}
+          onShare={shareRoom}
           youtubeQuery={youtubeUrl}
           youtubeVideoId={youtubeVideoId}
           onYoutubeQueryChange={setYoutubeUrl}
@@ -331,10 +346,10 @@ export default function SocialDashboard({ session, onSignOut }: SocialDashboardP
       <header className="sticky top-0 z-40 border-b border-white/10 bg-[#171125]/90 px-4 py-3 backdrop-blur-xl"><div className="mx-auto flex max-w-6xl items-center justify-between"><div className="flex items-center gap-2"><div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-rose-400 to-violet-600"><Heart className="h-5 w-5 fill-white" /></div><span className="font-black">LoveMatch</span></div><div className="flex items-center gap-2 text-xs font-black"><span className="rounded-full bg-violet-500/20 px-3 py-1.5 text-violet-200">💎 {wallet.coins}</span><span className="rounded-full bg-amber-400/20 px-3 py-1.5 text-amber-200">👑 {Math.floor(wallet.purchasedCoins / 10)}</span><button onClick={() => setRechargeOpen(true)} className="rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-3 py-1.5 text-black">Recharge</button>{profile?.avatarUrl ? <button onClick={() => profile && selectProfile(profile)}><img src={profile.avatarUrl} alt={profile.displayName} className="h-9 w-9 rounded-full object-cover ring-2 ring-rose-300" /></button> : <UserRound className="h-7 w-7 text-white/50" />}</div></div></header>
 
       <div className="mx-auto max-w-6xl px-4 py-6">
-        {activeTab === 'home' && <HomeView people={people} onRoom={() => { setActiveTab('party'); requestRoomMode('voice'); }} onProfile={selectProfile} onInvite={() => setInviteOpen(true)} />}
+        {activeTab === 'home' && <HomeView2 people={people} onRoom={() => { setActiveTab('party'); requestRoomMode('voice'); }} onProfile={selectProfile} onInvite={() => setInviteOpen(true)} />}
         {activeTab === 'party' && <PartyView roomName={roomName} setRoomName={setRoomName} roomId={roomId} theme={roomThemes[roomTheme]} roomMode={roomMode} viewerCount={viewerCount} cameraStream={cameraStream} videoRef={videoRef} mediaError={mediaError} joinedSeats={joinedSeats} micLevels={micLevels} onMode={requestRoomMode} onSeat={(seat) => setJoinedSeats((current) => current.includes(seat) ? current.filter((item) => item !== seat) : [...current, seat])} onTheme={() => setRoomTheme((roomTheme + 1) % roomThemes.length)} onInvite={() => setInviteOpen(true)} roomChat={roomChat} roomMessage={roomMessage} setRoomMessage={setRoomMessage} onSendMessage={sendRoomMessage} audioFile={audioFile} audioUrl={audioUrl} audioPlaying={audioPlaying} audioRef={audioRef} audioVolume={audioVolume} onVolume={setAudioVolume} onFile={handleAudioFile} onToggleAudio={() => void toggleAudio()} youtubeUrl={youtubeUrl} setYoutubeUrl={setYoutubeUrl} youtubeVideoId={youtubeVideoId} onResolveYoutube={resolveYoutubeQuery} youtubeSearchLoading={youtubeSearchLoading} youtubeSearchMessage={youtubeSearchMessage} onGift={(gift) => sendGift(gift)} onOpenProfile={(person) => { setGiftTarget(person); selectProfile(person); }} />}
         {activeTab === 'chat' && <ChatView people={people} onProfile={selectProfile} onGift={(gift, target) => sendGift(gift, target)} onRoom={() => { setActiveTab('party'); requestRoomMode('voice'); }} coins={wallet.coins} />}
-        {activeTab === 'mine' && <MineView profile={profile} wallet={wallet} onRecharge={() => setRechargeOpen(true)} onProfile={() => profile && selectProfile(profile)} onSignOut={onSignOut} />}
+        {activeTab === 'mine' && <MineView2 profile={profile} wallet={wallet} onRecharge={() => setRechargeOpen(true)} onProfile={() => profile && selectProfile(profile)} onSignOut={onSignOut} />}
       </div>
 
       <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-[#171326]/95 px-3 py-2 backdrop-blur-xl"><div className="mx-auto grid max-w-lg grid-cols-4 gap-1">{tabs.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setActiveTab(id)} className={`flex flex-col items-center gap-1 rounded-xl py-2 text-[11px] font-bold ${activeTab === id ? 'bg-rose-500/15 text-rose-300' : 'text-white/45'}`}><Icon className="h-5 w-5" />{label}</button>)}</div></nav>
@@ -342,7 +357,6 @@ export default function SocialDashboard({ session, onSignOut }: SocialDashboardP
       <InviteSheet open={inviteOpen} onClose={() => setInviteOpen(false)} people={people} />
       <GiftOverlay gift={activeGift} onClose={() => setActiveGift(null)} />
       <ProfileModal profile={selectedProfile} onClose={() => setSelectedProfile(null)} onGift={(gift) => selectedProfile && sendGift(gift, selectedProfile)} onChat={() => { setSelectedProfile(null); setActiveTab('chat'); }} />
-      {pendingRoomMode && <WarningModal mode={pendingRoomMode} onCancel={() => setPendingRoomMode(null)} onConfirm={confirmRoomStart} />}
     </main>
   );
 }

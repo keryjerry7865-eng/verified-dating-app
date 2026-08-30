@@ -83,6 +83,7 @@ const AuthScreen = () => {
 const AuthenticatedApp = ({ session }: { session: Session }) => {
   const [profile, setProfile] = useState<ReturnType<typeof normalizeProfile>>(null);
   const [loading, setLoading] = useState(true);
+  const roomId = new URLSearchParams(window.location.search).get('room');
 
   const loadProfile = async () => {
     setLoading(true);
@@ -115,7 +116,7 @@ const AuthenticatedApp = ({ session }: { session: Session }) => {
 
   const complete = Boolean(profile?.age && profile.age >= 18 && profile.gender && profile.city && profile.avatarUrl);
   return complete
-    ? <Dashboard session={session} onSignOut={() => void supabase.auth.signOut()} />
+    ? <Dashboard session={session} onSignOut={() => void supabase.auth.signOut()} initialRoomId={roomId || undefined} />
     : <ProfileSetup session={session} onComplete={() => void loadProfile()} />;
 };
 

@@ -23,6 +23,7 @@ type Props = {
   onSendMessage: (event: React.FormEvent) => void;
   onModeRequest: (mode: Mode) => void;
   onBack: () => void;
+  onShare: () => void;
   onSeat: (seat: number) => void;
   onTheme: () => void;
   onInvite: () => void;
@@ -63,7 +64,7 @@ export default function LivePartyRoom(props: Props) {
         <div className="flex items-center justify-between">
           <button type="button" onClick={props.onBack} className="flex items-center gap-1 rounded-xl bg-black/20 px-3 py-2 text-xs font-black"><ChevronLeft className="h-5 w-5" />Back</button>
           <div className="text-center"><p className="text-[10px] font-black uppercase tracking-widest text-white/60">{props.mode} room</p><h1 className="font-black">{props.roomName}</h1><p className="text-[10px] text-white/60">ID {props.roomId}</p></div>
-          <div className="flex gap-2"><button type="button" onClick={props.onInvite} className="rounded-full bg-black/20 p-2"><Share2 className="h-4 w-4" /></button><button type="button" onClick={props.onTheme} className="rounded-full bg-black/20 p-2"><Radio className="h-4 w-4" /></button></div>
+          <div className="flex gap-2"><button type="button" onClick={props.onShare} aria-label="Copy room link" className="rounded-full bg-black/20 p-2"><Share2 className="h-4 w-4" /></button><button type="button" onClick={props.onTheme} className="rounded-full bg-black/20 p-2"><Radio className="h-4 w-4" /></button></div>
         </div>
         <div className="mt-4 flex items-center justify-between rounded-2xl border border-white/15 bg-black/20 px-4 py-3"><span className="text-sm font-black">👀 {props.viewerCount.toLocaleString()} Watching</span><span className="text-xs text-white/60">Active audience</span></div>
         <div className="mt-4 flex gap-2 overflow-x-auto">{(['voice', 'video', 'live'] as Mode[]).map((mode) => <button type="button" key={mode} onClick={() => requestMode(mode)} className={`whitespace-nowrap rounded-xl px-3 py-2 text-[10px] font-black ${props.mode === mode ? 'bg-white text-gray-900' : 'bg-black/20 text-white/70'}`}>{mode === 'voice' ? 'Voice Party' : mode === 'video' ? 'Video Party' : 'Video Live Stream'}</button>)}</div>
