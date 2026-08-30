@@ -12,6 +12,13 @@ export default function Index() {
   const [walletBalance, setWalletBalance] = useState<number>(1200);
   const [streamerWallet, setStreamerWallet] = useState<number>(0);
   const [redeemedAmount, setRedeemedAmount] = useState<number>(0);
+  const [upiId, setUpiId] = useState('');
+  const [redeemToday, setRedeemToday] = useState(false);
+  const [dailyRedeemedAmount, setDailyRedeemedAmount] = useState(0);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+  const [reportCount, setReportCount] = useState(0);
+  const [reportProof, setReportProof] = useState<string | null>(null);
+  const [isBanned, setIsBanned] = useState(false);
 
   // 2. मीडिया स्टेट्स
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
@@ -35,10 +42,13 @@ export default function Index() {
   ] as const;
 
   const minRedeemBalance = 500;
-  const canRedeem = streamerWallet >= minRedeemBalance;
+  const maxRedeemPerDay = 10000;
+  const redeemableAmount = Math.min(streamerWallet, maxRedeemPerDay);
+  const canRedeem = streamerWallet >= minRedeemBalance && !redeemToday && upiId.trim().length > 0 && redeemableAmount > 0;
 
   // 3. Refs (फाइल अपलोड और वीडियो स्ट्रीमिंग के लिए)
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const reportInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -115,8 +125,39 @@ export default function Index() {
       return;
     }
 
-    setRedeemedAmount(prev => prev + streamerWallet);
-    setStreamerWallet(0);
+    const amountToRedeem = Math.min(streamerWallet, maxRedeemPerDay);
+    setRedeemedAmount(prev => prev + amountToRedeem);
+    setDailyRedeemedAmount(prev => prev + amountToRedeem);
+    setStreamerWallet(prev => Number(Math.max(prev - amountToRedeem, 0).toFixed(2)));
+    setRedeemToday(true);
+  };
+
+  const handleReportProofUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const nextCount = reportCount + 1;
+    setReportProof(URL.createObjectURL(file));
+    setReportCount(nextCount);
+    if (nextCount >= 10) {
+      setIsBanned(true);
+    }
+  };
+
+  const handleReportStreamer = () => {
+    if (isBanned) return;
+    if (reportInputRef.current) {
+      reportInputRef.current.click();
+    }
+  };
+
+  const handleLiveStartRequest = () => {
+    setShowPrivacyModal(true);
+  };
+
+  const confirmLiveStart = async () => {
+    setShowPrivacyModal(false);
+    await startCamera();
   };
 
   // 1. लॉगिन / साइनअप यूआई (यदि लॉगइन नहीं है)
@@ -153,6 +194,26 @@ export default function Index() {
     );
   }
 
+  if (isBanned) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-red-50 to-red-100 flex items-center justify-center p-4">
+        <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 text-center space-y-5 border border-red-200">
+          <div className="text-6xl">🚫</div>
+          <h1 className="text-3xl font-black text-red-600">Account Banned</h1>
+          <p className="text-sm text-gray-600">
+            This streamer account has been blocked after multiple genuine user reports and proof submissions.
+          </p>
+          <button
+            onClick={() => setIsLoggedIn(false)}
+            className="w-full py-3 bg-red-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-red-700"
+          >
+            Return to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // 2. मुख्य एप्लिकेशन यूआई (लॉगिन होने के बाद)
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-between pb-16">
@@ -176,6 +237,33 @@ export default function Index() {
           </button>
         </div>
       </div>
+
+      {showPrivacyModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+            <h3 className="text-2xl font-black text-gray-800 text-center">Privacy Policy & Community Rules</h3>
+            <div className="mt-4 rounded-2xl bg-red-50 border border-red-200 p-4 text-left text-sm text-gray-700 space-y-2">
+              <p><strong>Important:</strong> No pornography, nudity, or slang is allowed in live content.</p>
+              <p>Violations may lead to warnings, content removal, or permanent account suspension.</p>
+              <p>By clicking Agree, you confirm that your stream follows all platform safety rules.</p>
+            </div>
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={() => setShowPrivacyModal(false)}
+                className="flex-1 py-3 border border-gray-200 rounded-xl font-bold text-sm text-gray-600"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmLiveStart}
+                className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-red-700"
+              >
+                Agree
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* मुख्य कंटेंट एरिया */}
       <div className="w-full max-w-md p-4 flex-1 flex flex-col justify-center">
@@ -221,8 +309,23 @@ export default function Index() {
               {isStreaming ? (
                 <button onClick={stopCamera} className="w-full py-3 bg-gray-800 text-white rounded-xl font-bold text-sm shadow-md">Stop Streaming</button>
               ) : (
-                <button onClick={startCamera} className="w-full py-3 bg-red-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-red-700">Start Live Streaming Now</button>
+                <button onClick={handleLiveStartRequest} className="w-full py-3 bg-red-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-red-700">Start Live Streaming Now</button>
               )}
+
+              <button
+                onClick={handleReportStreamer}
+                className="w-full py-2.5 bg-red-50 border border-red-200 text-red-600 rounded-xl font-bold text-xs shadow-sm hover:bg-red-100"
+              >
+                Report Streamer
+              </button>
+
+              <input
+                type="file"
+                accept="image/*,video/*"
+                ref={reportInputRef}
+                onChange={handleReportProofUpload}
+                className="hidden"
+              />
 
               <div className="space-y-3 border-t border-gray-100 pt-4 text-left">
                 <div className="flex items-center justify-between text-xs text-gray-500">
@@ -244,6 +347,17 @@ export default function Index() {
                   ))}
                 </div>
 
+                <div className="space-y-2">
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">UPI ID</label>
+                  <input
+                    type="text"
+                    value={upiId}
+                    onChange={(e) => setUpiId(e.target.value)}
+                    placeholder="yourupi@upi"
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-pink-300 focus:outline-none"
+                  />
+                </div>
+
                 <button
                   onClick={handleRedeem}
                   disabled={!canRedeem}
@@ -253,12 +367,19 @@ export default function Index() {
                       : 'bg-gray-200 text-gray-500 cursor-not-allowed'
                   }`}
                 >
-                  {canRedeem ? `Redeem ₹${streamerWallet.toFixed(2)}` : `Redeem minimum ₹${minRedeemBalance}`}
+                  {redeemToday
+                    ? 'Daily withdrawal used up'
+                    : canRedeem
+                      ? `Redeem ₹${redeemableAmount.toFixed(2)} via UPI`
+                      : `Redeem minimum ₹${minRedeemBalance}`}
                 </button>
 
                 <div className="text-[10px] text-gray-400">
-                  45% of each gift value goes to the streamer wallet. Total redeemed: ₹{redeemedAmount.toFixed(2)}
+                  45% of each gift value goes to streamer wallet. Max withdrawal: ₹{maxRedeemPerDay}. Daily limit: once per day. Total redeemed: ₹{redeemedAmount.toFixed(2)}
                 </div>
+                {reportProof && (
+                  <div className="text-[10px] text-gray-500">Last uploaded proof: {reportProof ? 'attached' : 'none'}</div>
+                )}
               </div>
             </div>
           </div>
