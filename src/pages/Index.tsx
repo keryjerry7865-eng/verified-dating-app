@@ -1,19 +1,116 @@
-import { useState } from 'react';
-import { Heart, User, Video, CreditCard, Image as ImageIcon } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Heart, User, Video, CreditCard, Image as ImageIcon, LogOut } from 'lucide-react';
 
 export default function Index() {
-  // 1. स्टेट वेरिएबल्स (States)
+  // 1. ऑथेंटिकेशन और ऐप कोर स्टेट्स
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [authLoading, setAuthLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('swipe');
-  const [likesCount, setLikesCount] = useState(0);
+  const [likesCount, setLikesCount] = useState(40);
   const [isPremium, setIsPremium] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<any>(null);
 
-  // 2. डमी यूजर डेटा
+  // 2. मीडिया स्टेट्स
+  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+  const [isStreaming, setIsStreaming] = useState(false);
+
+  // 3. Refs (फाइल अपलोड और वीडियो स्ट्रीमिंग के लिए)
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  // डमी यूजर डेटा
   const name = "राहुल";
   const city = "दिल्ली";
   const age = 24;
   const gender = "Male";
 
+  // गूगल लॉगिन सिमुलेशन
+  const handleGoogleLogin = () => {
+    setAuthLoading(true);
+    setTimeout(() => {
+      setIsLoggedIn(true);
+      setAuthLoading(false);
+    }, 1500);
+  };
+
+  // फाइल अपलोड इनपुट को ट्रिगर करना
+  const triggerFileUpload = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
+  // चुनी गई इमेज का प्रीव्यू सेट करना
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setUploadedImage(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // असली कैमरा चालू करना (Live Streaming)
+  const startCamera = async () => {
+    try {
+      setIsStreaming(true);
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      alert("कैमरा एक्सेस करने में विफल: कृपया कैमरा परमिशन चेक करें।");
+      setIsStreaming(false);
+    }
+  };
+
+  // कैमरा बंद करना
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+    }
+    setIsStreaming(false);
+  };
+
+  // 1. लॉगिन / साइनअप यूआई (यदि लॉगइन नहीं है)
+  if (!isLoggedIn) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-pink-50 to-red-100 flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 text-center space-y-6 border border-pink-100">
+          <div className="flex justify-center items-center gap-2">
+            <Heart className="w-10 h-10 text-red-500 fill-current animate-bounce" />
+            <span className="font-black text-3xl tracking-tight text-gray-800">LoveMatch</span>
+          </div>
+          <p className="text-gray-500 text-sm">अपने परफेक्ट मैच से जुड़ने के लिए लॉगिन या साइनअप करें</p>
+          
+          <button 
+            onClick={handleGoogleLogin}
+            disabled={authLoading}
+            className="w-full py-3.5 bg-white border-2 border-gray-200 rounded-xl font-bold text-sm text-gray-700 shadow-sm flex items-center justify-center gap-3 hover:bg-gray-50 transition active:scale-95 disabled:opacity-50"
+          >
+            {authLoading ? (
+              <div className="w-5 h-5 border-2 border-red-500 border-t-transparent rounded-full animate-spin"></div>
+            ) : (
+              <>
+                <svg className="w-5 h-5" viewBox="0 0 24 24">
+                  <path fill="#EA4335" d="M12.24 10.285V14.4h6.887c-.275 1.565-1.88 4.604-6.887 4.604-4.33 0-7.866-3.577-7.866-8s3.536-8 7.866-8c2.46 0 4.105 1.025 5.047 1.926l3.227-3.227C18.216 1.414 15.48 0 12.24 0 5.58 0 0 5.58 0 12.24s5.58 12.24 12.24 12.24c6.96 0 11.57-4.89 11.57-11.79 0-.795-.085-1.4-.195-1.905H12.24z"/>
+                </svg>
+                Continue with Google
+              </>
+            )}
+          </button>
+          
+          <div className="text-xs text-gray-400">By continuing, you agree to our Terms & Privacy Policy</div>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. मुख्य एप्लिकेशन यूआई (लॉगिन होने के बाद)
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-between pb-16">
       {/* हेडर बार */}
@@ -22,15 +119,18 @@ export default function Index() {
           <Heart className="w-6 h-6 text-red-500 fill-current" />
           <span className="font-extrabold text-xl tracking-tight text-gray-800">LoveMatch</span>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
           <span className="bg-pink-50 text-pink-600 px-3 py-1 rounded-full text-xs font-bold border border-pink-100">
             💖 Likes: {likesCount}/50
           </span>
-          {isPremium && (
-            <span className="bg-yellow-400 text-white px-2.5 py-1 rounded-full text-xs font-bold shadow-sm">
-              ★ VIP
-            </span>
+          {isPremium ? (
+            <span className="bg-yellow-400 text-white px-2.5 py-1 rounded-full text-xs font-bold shadow-sm">★ VIP</span>
+          ) : (
+            <span className="bg-gray-200 text-gray-600 px-2.5 py-1 rounded-full text-xs font-bold">Free</span>
           )}
+          <button onClick={() => { stopCamera(); setIsLoggedIn(false); }} className="text-gray-400 hover:text-red-500 p-1">
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
@@ -49,7 +149,7 @@ export default function Index() {
               <p className="text-sm mt-1 font-medium">लाइव स्ट्रीमिंग और मोमेंट्स के लिए 50 लाइक्स चाहिए या प्रीमियम लें!</p>
             </div>
             <button 
-              onClick={() => setLikesCount(prev => prev + 10)} 
+              onClick={() => setLikesCount(prev => Math.min(prev + 10, 50))} 
               className="w-full py-3 bg-red-500 text-white rounded-xl font-bold text-sm shadow-md hover:bg-red-600 transition"
             >
               Simulate Getting +10 Likes 👍
@@ -62,17 +162,25 @@ export default function Index() {
           <div className="bg-white rounded-3xl shadow-xl p-6 text-center border border-gray-100">
             {likesCount >= 50 || isPremium ? (
               <div className="space-y-4">
-                <div className="w-full h-48 bg-black rounded-2xl flex items-center justify-center relative overflow-hidden">
-                  <div className="absolute top-3 left-3 bg-red-600 text-white px-2 py-0.5 rounded text-xs font-bold animate-pulse">● LIVE</div>
-                  <Video className="w-12 h-12 text-gray-400" />
+                <div className="w-full h-64 bg-black rounded-2xl flex items-center justify-center relative overflow-hidden shadow-inner">
+                  {isStreaming ? (
+                    <>
+                      <div className="absolute top-3 left-3 bg-red-600 text-white px-2 py-0.5 rounded text-xs font-bold animate-pulse z-10">● LIVE</div>
+                      <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]"></video>
+                    </>
+                  ) : (
+                    <div className="text-center space-y-2">
+                      <Video className="w-12 h-12 text-gray-500 mx-auto" />
+                      <p className="text-xs text-gray-400">कैमरा रेडी है</p>
+                    </div>
+                  )}
                 </div>
                 <h3 className="text-xl font-bold text-gray-800">You are ready to Go Live! 📹</h3>
-                <button 
-                  onClick={() => alert("🎥 आपकी लाइव स्ट्रीमिंग शुरू हो रही है...")} 
-                  className="w-full py-3 bg-red-600 text-white rounded-xl font-bold text-sm shadow-md"
-                >
-                  Start Live Streaming Now
-                </button>
+                {isStreaming ? (
+                  <button onClick={stopCamera} className="w-full py-3 bg-gray-800 text-white rounded-xl font-bold text-sm shadow-md">Stop Streaming</button>
+                ) : (
+                  <button onClick={startCamera} className="w-full py-3 bg-red-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-red-700">Start Live Streaming Now</button>
+                )}
               </div>
             ) : (
               <div className="py-8 space-y-4">
@@ -87,90 +195,115 @@ export default function Index() {
 
         {/* मोमेंट्स टैब */}
         {activeTab === 'moments' && (
-          <div className="bg-white rounded-3xl shadow-xl p-6 text-center border border-gray-100">
+          <div className="bg-white rounded-3xl shadow-xl p-6 border border-gray-100">
             {likesCount >= 50 || isPremium ? (
               <div className="space-y-4 text-left">
                 <h3 className="text-xl font-bold text-gray-800 text-center">Share Your Moment 📸</h3>
-                <div className="border-2 border-dashed border-gray-200 rounded-2xl p-8 text-center bg-gray-50">
-                  <ImageIcon className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                  <p className="text-xs text-gray-500 font-medium">Click to capture or upload your story</p>
-                </div>
-                <button 
-                  onClick={() => alert("🚀 आपका मोमेंट सफलतापूर्वक शेयर हो गया है!")} 
-                  className="w-full py-2.5 bg-pink-500 text-white rounded-xl font-bold text-sm shadow-md"
+
+                <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" className="hidden" />
+
+                <div
+                  onClick={triggerFileUpload}
+                  className="border-2 border-dashed border-pink-200 rounded-2xl p-4 text-center bg-pink-50/30 cursor-pointer hover:bg-pink-50 transition min-h-[180px] flex flex-col justify-center items-center"
                 >
-                  Post Story
-                </button>
+                  {uploadedImage ? (
+                    <div className="w-full overflow-hidden rounded-2xl">
+                      <img src={uploadedImage} alt="Uploaded preview" className="w-full h-52 object-cover rounded-2xl" />
+                    </div>
+                  ) : (
+                    <>
+                      <ImageIcon className="w-10 h-10 text-pink-400 mb-2" />
+                      <p className="font-semibold text-pink-500">Upload a moment</p>
+                      <p className="text-xs text-gray-400 mt-1">Tap to choose a photo</p>
+                    </>
+                  )}
+                </div>
+
+                {uploadedImage && (
+                  <button
+                    onClick={() => setUploadedImage(null)}
+                    className="w-full py-2.5 bg-gray-100 text-gray-700 rounded-xl font-semibold text-sm hover:bg-gray-200 transition"
+                  >
+                    Remove Photo
+                  </button>
+                )}
               </div>
             ) : (
-              <div className="py-8 space-y-4">
+              <div className="py-8 space-y-4 text-center">
                 <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto text-gray-400">🔒</div>
-                <h3 className="text-lg font-bold text-gray-800">Moments Page is Locked!</h3>
-                <p className="text-xs text-gray-500 px-4">स्टोरीज और मोमेंट्स शेयर करने के लिए 50 लाइक्स की जरूरत है। प्रीमियम यूजर्स के लिए यह तुरंत उपलब्ध है।</p>
-                <button onClick={() => setActiveTab('premium')} className="px-5 py-2 bg-yellow-500 text-white rounded-xl font-bold text-xs shadow-sm">Unlock with Premium ✨</button>
+                <h3 className="text-lg font-bold text-gray-800">Moments are Locked!</h3>
+                <p className="text-xs text-gray-500 px-4">Unlock moments by getting 50 likes or upgrading to premium.</p>
+                <button onClick={() => setActiveTab('premium')} className="px-5 py-2 bg-yellow-500 text-white rounded-xl font-bold text-xs shadow-sm">Upgrade to Premium ✨</button>
               </div>
             )}
           </div>
         )}
 
-        {/* प्रीमियम वीआईपी टैब */}
+        {/* प्रीमियम टैब */}
         {activeTab === 'premium' && (
           <div className="bg-white rounded-3xl shadow-xl p-6 border border-gray-100 space-y-5">
-            <div className="text-center">
-              <h3 className="text-2xl font-black text-gray-800">LoveMatch Premium ✨</h3>
-              <p className="text-xs text-gray-400 mt-0.5">Unlock Live Streaming & Moments Instantly</p>
-            </div>
-            {!selectedPlan ? (
-              <div className="space-y-3">
-                {[
-                  { name: "3 Days VIP Pack", price: "₹29", desc: "Quick unlock testing" },
-                  { name: "1 Week Full Access", price: "₹49", desc: "Most popular choice" },
-                  { name: "1 Month VIP Gold", price: "₹99", desc: "Best value subscription" }
-                ].map(p => (
-                  <div key={p.name} onClick={() => setSelectedPlan(p)} className="border p-4 rounded-2xl flex justify-between items-center cursor-pointer hover:bg-yellow-50/20 transition">
-                    <div>
-                      <p className="font-bold text-sm text-gray-800">{p.name}</p>
-                      <p className="text-xs text-gray-400">{p.desc}</p>
-                    </div>
-                    <span className="bg-yellow-400 text-white font-black px-3 py-1 rounded-xl text-xs shadow-sm">{p.price}</span>
+            <h3 className="text-2xl font-bold text-gray-800 text-center">Choose Your Plan</h3>
+
+            {[
+              { id: 'monthly', name: 'Monthly', price: '₹499/mo', popular: false },
+              { id: 'vip', name: 'VIP', price: '₹999/mo', popular: true },
+            ].map((plan) => (
+              <button
+                key={plan.id}
+                onClick={() => {
+                  setSelectedPlan(plan);
+                  setIsPremium(true);
+                  setActiveTab('swipe');
+                }}
+                className={`w-full rounded-2xl border p-4 text-left transition ${
+                  selectedPlan?.id === plan.id || plan.popular
+                    ? 'border-yellow-400 bg-yellow-50 shadow-sm'
+                    : 'border-gray-200 bg-white hover:border-pink-200'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-bold text-gray-800">{plan.name}</div>
+                    <div className="text-xs text-gray-500">Best for {plan.name === 'VIP' ? 'exclusive access' : 'casual dating'}</div>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div className="bg-gray-50 p-5 rounded-2xl border text-center space-y-4">
-                <div className="flex justify-between items-center border-b pb-2">
-                  <span className="text-xs text-gray-500 font-medium">Selected Plan:</span>
-                  <span className="font-bold text-sm text-gray-800">{selectedPlan.name}</span>
+                  <div className="text-right">
+                    <div className="font-black text-lg text-gray-800">{plan.price}</div>
+                    {plan.popular && <span className="text-[10px] font-bold text-yellow-700">MOST POPULAR</span>}
+                  </div>
                 </div>
-                <div className="py-2 bg-white border rounded-xl shadow-inner font-mono text-xl font-black text-yellow-600">{selectedPlan.price}</div>
-                <p className="text-xs text-gray-400">Scan QR Code or Pay via UPI ID (Google Pay / PhonePe / Paytm)</p>
-                <button 
-                  onClick={() => { setIsPremium(true); setSelectedPlan(null); setActiveTab('swipe'); alert("🎉 UPI पेमेंट सफल! प्रीमियम फीचर्स अनलॉक हो चुके हैं।"); }} 
-                  className="w-full py-3 bg-green-500 text-white rounded-xl font-bold text-sm shadow-md flex items-center justify-center gap-1.5"
-                >
-                  <CreditCard className="w-4 h-4" /> Pay Securely via UPI
-                </button>
-                <button onClick={() => setSelectedPlan(null)} className="text-xs text-gray-400 hover:underline block mx-auto">Change Plan</button>
+              </button>
+            ))}
+
+            <div className="rounded-2xl bg-gradient-to-r from-yellow-400 to-orange-500 p-4 text-white text-center">
+              <div className="flex items-center justify-center gap-2 text-sm font-bold">
+                <CreditCard className="w-4 h-4" /> Secure payment
               </div>
-            )}
+            </div>
           </div>
         )}
       </div>
 
-      {/* बॉटम नेविगेशन बार (अब कोष्ठक पूरी तरह से सही हैं) */}
-      <div className="w-full max-w-md bg-white border-t fixed bottom-0 flex justify-around py-2.5 z-50 shadow-lg">
-        <button onClick={() => setActiveTab('swipe')} className={`flex flex-col items-center text-xs font-semibold ${activeTab === 'swipe' ? 'text-red-500' : 'text-gray-400'}`}>
-          <span className="text-lg">👤</span> Discover
-        </button>
-        <button onClick={() => setActiveTab('live')} className={`flex flex-col items-center text-xs font-semibold ${activeTab === 'live' ? 'text-red-500' : 'text-gray-400'}`}>
-          <span className="text-lg">📹</span> Go Live
-        </button>
-        <button onClick={() => setActiveTab('moments')} className={`flex flex-col items-center text-xs font-semibold ${activeTab === 'moments' ? 'text-red-500' : 'text-gray-400'}`}>
-          <span className="text-lg">📸</span> Moments
-        </button>
-        <button onClick={() => setActiveTab('premium')} className={`flex flex-col items-center text-xs font-semibold ${activeTab === 'premium' ? 'text-yellow-600 font-bold' : 'text-gray-400'}`}>
-          <span className="text-lg">✨</span> VIP Premium
-        </button>
+      {/* 하단 네비게이션 */}
+      <div className="w-full max-w-md fixed bottom-0 left-1/2 -translate-x-1/2 bg-white border-t shadow-lg">
+        <div className="grid grid-cols-4 gap-1 p-2">
+          {[
+            { id: 'swipe', label: 'Swipe', icon: Heart },
+            { id: 'live', label: 'Live', icon: Video },
+            { id: 'moments', label: 'Moments', icon: ImageIcon },
+            { id: 'premium', label: 'Premium', icon: CreditCard },
+          ].map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id)}
+              className={`flex flex-col items-center gap-1 py-2 rounded-xl text-[11px] font-semibold transition ${
+                activeTab === id ? 'text-red-500 bg-red-50' : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
