@@ -203,73 +203,64 @@ export default function Index() {
         {/* लाइव स्ट्रीमिंग टैब */}
         {activeTab === 'live' && (
           <div className="bg-white rounded-3xl shadow-xl p-6 text-center border border-gray-100">
-            {likesCount >= 50 || isPremium ? (
-              <div className="space-y-4">
-                <div className="w-full h-64 bg-black rounded-2xl flex items-center justify-center relative overflow-hidden shadow-inner">
-                  {isStreaming ? (
-                    <>
-                      <div className="absolute top-3 left-3 bg-red-600 text-white px-2 py-0.5 rounded text-xs font-bold animate-pulse z-10">● LIVE</div>
-                      <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]"></video>
-                    </>
-                  ) : (
-                    <div className="text-center space-y-2">
-                      <Video className="w-12 h-12 text-gray-500 mx-auto" />
-                      <p className="text-xs text-gray-400">कैमरा रेडी है</p>
-                    </div>
-                  )}
-                </div>
-                <h3 className="text-xl font-bold text-gray-800">You are ready to Go Live! 📹</h3>
+            <div className="space-y-4">
+              <div className="w-full h-64 bg-black rounded-2xl flex items-center justify-center relative overflow-hidden shadow-inner">
                 {isStreaming ? (
-                  <button onClick={stopCamera} className="w-full py-3 bg-gray-800 text-white rounded-xl font-bold text-sm shadow-md">Stop Streaming</button>
+                  <>
+                    <div className="absolute top-3 left-3 bg-red-600 text-white px-2 py-0.5 rounded text-xs font-bold animate-pulse z-10">● LIVE</div>
+                    <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]"></video>
+                  </>
                 ) : (
-                  <button onClick={startCamera} className="w-full py-3 bg-red-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-red-700">Start Live Streaming Now</button>
+                  <div className="text-center space-y-2">
+                    <Video className="w-12 h-12 text-gray-500 mx-auto" />
+                    <p className="text-xs text-gray-400">कैमरा रेडी है</p>
+                  </div>
                 )}
+              </div>
+              <h3 className="text-xl font-bold text-gray-800">You are ready to Go Live! 📹</h3>
+              {isStreaming ? (
+                <button onClick={stopCamera} className="w-full py-3 bg-gray-800 text-white rounded-xl font-bold text-sm shadow-md">Stop Streaming</button>
+              ) : (
+                <button onClick={startCamera} className="w-full py-3 bg-red-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-red-700">Start Live Streaming Now</button>
+              )}
 
-                <div className="space-y-3 border-t border-gray-100 pt-4 text-left">
-                  <div className="flex items-center justify-between text-xs text-gray-500">
-                    <span>Wallet: ₹{walletBalance}</span>
-                    <span>Streamer wallet: ₹{streamerWallet.toFixed(2)}</span>
-                  </div>
+              <div className="space-y-3 border-t border-gray-100 pt-4 text-left">
+                <div className="flex items-center justify-between text-xs text-gray-500">
+                  <span>Wallet: ₹{walletBalance}</span>
+                  <span>Streamer wallet: ₹{streamerWallet.toFixed(2)}</span>
+                </div>
 
-                  <div className="grid grid-cols-3 gap-2">
-                    {giftCatalog.map((gift) => (
-                      <button
-                        key={`${gift.name}-${gift.price}`}
-                        onClick={() => handleGiftSend(gift)}
-                        className="rounded-2xl border border-pink-100 bg-pink-50/40 p-2 text-center transition hover:border-pink-200 hover:bg-pink-50"
-                      >
-                        <div className="text-2xl mb-1">{gift.icon}</div>
-                        <div className="text-[10px] font-bold text-gray-700 leading-tight">{gift.name}</div>
-                        <div className="mt-1 text-[10px] font-semibold text-pink-600">₹{gift.price}</div>
-                      </button>
-                    ))}
-                  </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {giftCatalog.map((gift) => (
+                    <button
+                      key={`${gift.name}-${gift.price}`}
+                      onClick={() => handleGiftSend(gift)}
+                      className="rounded-2xl border border-pink-100 bg-pink-50/40 p-2 text-center transition hover:border-pink-200 hover:bg-pink-50"
+                    >
+                      <div className="text-2xl mb-1">{gift.icon}</div>
+                      <div className="text-[10px] font-bold text-gray-700 leading-tight">{gift.name}</div>
+                      <div className="mt-1 text-[10px] font-semibold text-pink-600">₹{gift.price}</div>
+                    </button>
+                  ))}
+                </div>
 
-                  <button
-                    onClick={handleRedeem}
-                    disabled={!canRedeem}
-                    className={`w-full py-2.5 rounded-xl font-bold text-sm transition ${
-                      canRedeem
-                        ? 'bg-green-600 text-white hover:bg-green-700'
-                        : 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                    }`}
-                  >
-                    {canRedeem ? `Redeem ₹${streamerWallet.toFixed(2)}` : `Redeem minimum ₹${minRedeemBalance}`}
-                  </button>
+                <button
+                  onClick={handleRedeem}
+                  disabled={!canRedeem}
+                  className={`w-full py-2.5 rounded-xl font-bold text-sm transition ${
+                    canRedeem
+                      ? 'bg-green-600 text-white hover:bg-green-700'
+                      : 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                  }`}
+                >
+                  {canRedeem ? `Redeem ₹${streamerWallet.toFixed(2)}` : `Redeem minimum ₹${minRedeemBalance}`}
+                </button>
 
-                  <div className="text-[10px] text-gray-400">
-                    45% of each gift value goes to the streamer wallet. Total redeemed: ₹{redeemedAmount.toFixed(2)}
-                  </div>
+                <div className="text-[10px] text-gray-400">
+                  45% of each gift value goes to the streamer wallet. Total redeemed: ₹{redeemedAmount.toFixed(2)}
                 </div>
               </div>
-            ) : (
-              <div className="py-8 space-y-4">
-                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto text-gray-400">🔒</div>
-                <h3 className="text-lg font-bold text-gray-800">Live Streaming is Locked!</h3>
-                <p className="text-xs text-gray-500 px-4">इस फीचर को खोलने के लिए कम से कम 50 लाइक्स हासिल करें या अभी वीआईपी प्रीमियम सब्सक्रिप्शन लें।</p>
-                <button onClick={() => setActiveTab('premium')} className="px-5 py-2 bg-yellow-500 text-white rounded-xl font-bold text-xs shadow-sm">Upgrade to Premium ✨</button>
-              </div>
-            )}
+            </div>
           </div>
         )}
 
