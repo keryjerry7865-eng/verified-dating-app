@@ -11,7 +11,6 @@ type ProfileSetupProps = {
 const interests = ['Travel', 'Music', 'Movies', 'Fitness', 'Food', 'Art', 'Gaming', 'Reading'];
 
 export default function ProfileSetup({ session, onComplete }: ProfileSetupProps) {
-  const [fullName, setFullName] = useState('');
   const [age, setAge] = useState('');
   const [gender, setGender] = useState('');
   const [city, setCity] = useState('');
@@ -72,7 +71,6 @@ export default function ProfileSetup({ session, onComplete }: ProfileSetupProps)
 
       const { error } = await supabase.from('profiles').upsert({
         id: session.user.id,
-        display_name: fullName.trim(),
         age: Number(age),
         gender,
         city: city.trim(),
@@ -115,7 +113,6 @@ export default function ProfileSetup({ session, onComplete }: ProfileSetupProps)
           </label>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="text-sm font-bold text-gray-700">Full name<input required value={fullName} onChange={(event) => setFullName(event.target.value)} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-3 font-normal outline-none focus:border-rose-400" /></label>
             <label className="text-sm font-bold text-gray-700">Age<input required min="18" max="100" type="number" value={age} onChange={(event) => setAge(event.target.value)} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-3 font-normal outline-none focus:border-rose-400" /></label>
             <label className="text-sm font-bold text-gray-700">Gender<select required value={gender} onChange={(event) => setGender(event.target.value)} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-3 font-normal outline-none focus:border-rose-400"><option value="">Choose one</option><option>Woman</option><option>Man</option><option>Non-binary</option><option>Prefer not to say</option></select></label>
             <label className="text-sm font-bold text-gray-700">City / location<input required value={city} onChange={(event) => setCity(event.target.value)} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-3 font-normal outline-none focus:border-rose-400" /></label>

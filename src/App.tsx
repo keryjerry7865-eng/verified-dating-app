@@ -20,6 +20,11 @@ const formatError = (error: unknown) => {
     : message;
 };
 
+const getDisplayName = (session: Session) => {
+  const metadata = session.user.user_metadata;
+  return metadata?.display_name || metadata?.name || metadata?.full_name || session.user.email?.split('@')[0] || 'LoveMatch member';
+};
+
 const AuthScreen = () => {
   const [mode, setMode] = useState<"sign-in" | "sign-up">("sign-in");
   const [email, setEmail] = useState("");
@@ -75,13 +80,13 @@ const AuthScreen = () => {
 };
 
 const AuthenticatedApp = ({ session }: { session: Session }) => {
-  const [profile, setProfile] = useState<{ display_name: string; age: number; gender: string; city: string; avatar_url: string | null } | null>(null);
+  const [profile, setProfile] = useState<{ age: number; gender: string; city: string; avatar_url: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const loadProfile = async () => {
     setLoading(true);
-    const { data, error: profileError } = await supabase.from("profiles").select("display_name,age,gender,city,avatar_url").eq("id", session.user.id).maybeSingle();
+    const { data, error: profileError } = await supabase.from("profiles").select("age,gender,city,avatar_url").eq("id", session.user.id).maybeSingle();
     if (profileError) setError(profileError.message);
     setProfile(data);
     setLoading(false);
@@ -92,7 +97,7 @@ const AuthenticatedApp = ({ session }: { session: Session }) => {
   if (loading) return <div className="flex min-h-screen items-center justify-center bg-rose-50 text-sm font-bold text-gray-600">Loading your profile...</div>;
   if (error) return <div className="flex min-h-screen items-center justify-center p-6 text-center text-sm text-rose-600">{error}</div>;
 
-  const complete = Boolean(profile?.display_name && profile.age >= 18 && profile.gender && profile.city && profile.avatar_url);
+  const complete = Boolean(profile?.age >= 18 && profile.gender && profile.city && profile.avatar_url);
   return complete
     ? <Dashboard session={session} onSignOut={() => void supabase.auth.signOut()} />
     : <ProfileSetup session={session} onComplete={() => void loadProfile()} />;
