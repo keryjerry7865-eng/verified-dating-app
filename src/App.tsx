@@ -1,204 +1,76 @@
-import { Suspense, lazy, useEffect, useState } from "react";
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
-import { Heart, LockKeyhole, Mail } from "lucide-react";
-import type { Session } from "@supabase/supabase-js";
-import { supabase, supabaseConfigError } from "./supabaseClient";
-import { isProfileComplete, normalizeProfile, readLocalProfile } from "./lib/profileFallback";
+import { useState } from 'react';
+import { Compass, DollarSign, Gift, Home as HomeIcon, MessageSquare, Mic, Plus, Send, Share2, User, X } from 'lucide-react';
 
-const Dashboard = lazy(() => import("./components/Dashboard"));
-const ProfileSetup = lazy(() => import("./components/ProfileSetup"));
-const NotFound = lazy(() => import("./pages/NotFound"));
+type TabId = 'home' | 'party' | 'chat' | 'mine';
+type Profile = { name: string; age: number; location: string; bio: string; img: string };
 
-const queryClient = new QueryClient();
+export interface SocialDashboardProps {
+  initialCoins?: number;
+  initialIncomeWallet?: number;
+}
 
-const formatError = (error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error || "Unknown authentication error");
-  return message.toLowerCase().includes("failed to fetch") || message.toLowerCase().includes("network")
-    ? "Network error. Check your connection and Supabase project status."
-    : message;
-};
+interface LivePartyRoomProps {
+  userCoins: number;
+  setUserCoins: (value: number | ((current: number) => number)) => void;
+  incomeWallet: number;
+  setIncomeWallet: (value: number | ((current: number) => number)) => void;
+  setInRoom: (value: boolean) => void;
+  setIsShareOpen: (value: boolean) => void;
+}
 
-const getDisplayName = (session: Session) => {
-  const metadata = session.user.user_metadata;
-  return metadata?.display_name || metadata?.name || metadata?.full_name || session.user.email?.split('@')[0] || 'LoveMatch member';
-};
+interface DatingMatchCenterProps { setInRoom: (value: boolean) => void; }
+interface ProfileCenterProps {
+  hostDiamonds: number;
+  incomeWallet: number;
+  setIncomeWallet: (value: number | ((current: number) => number)) => void;
+  upiId: string;
+  setUpiId: (value: string) => void;
+}
+interface InviteBottomSheetProps { isOpen: boolean; onClose: () => void; }
 
-const AuthScreen = () => {
-  const [mode, setMode] = useState<"sign-in" | "sign-up">("sign-in");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
+const mockProfiles: Profile[] = [
+  { name: 'Kritika Sharma', age: 24, location: 'Kolkata, 3.2 km', bio: 'Love music and late-night voice chatting.', img: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=640&q=80' },
+  { name: 'Aarchu Gupta', age: 22, location: 'Delhi, 12 km', bio: 'Looking for genuine connections. Let us talk on mic.', img: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=640&q=80' },
+  { name: 'Maya Singh', age: 26, location: 'Mumbai, 5 km', bio: 'Good energy and honest conversations.', img: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=640&q=80' },
+];
+const gifts = [{ name: 'Rose', emoji: '🌹', price: 10 }, { name: 'Crown', emoji: '👑', price: 150 }, { name: 'Car', emoji: '🚗', price: 250 }];
 
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setLoading(true);
-    setMessage("");
+export default function App({ initialCoins = 3850, initialIncomeWallet = 157 }: SocialDashboardProps) {
+  const [activeTab, setActiveTab] = useState<TabId>('home');
+  const [inRoom, setInRoom] = useState(false);
+  const [isShareOpen, setIsShareOpen] = useState(false);
+  const [userCoins, setUserCoins] = useState(initialCoins);
+  const [hostDiamonds] = useState(40000);
+  const [incomeWallet, setIncomeWallet] = useState(initialIncomeWallet);
+  const [upiId, setUpiId] = useState('');
 
-    if (supabaseConfigError) {
-      setMessage(supabaseConfigError);
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const result = mode === "sign-in"
-        ? await supabase.auth.signInWithPassword({ email, password })
-        : await supabase.auth.signUp({ email, password });
-
-      if (result.error) throw result.error;
-      if (mode === "sign-up" && !result.data.session) {
-        setMessage("Account created. Check your email, then sign in.");
-        setMode("sign-in");
-      }
-    } catch (error) {
-      setMessage(formatError(error));
-    } finally {
-      setLoading(false);
+  const renderTab = () => {
+    if (inRoom) return <LivePartyRoom userCoins={userCoins} setUserCoins={setUserCoins} incomeWallet={incomeWallet} setIncomeWallet={setIncomeWallet} setInRoom={setInRoom} setIsShareOpen={setIsShareOpen} />;
+    switch (activeTab) {
+      case 'home': return <ExploreDashboard setInRoom={setInRoom} />;
+      case 'party': return <DatingMatchCenter setInRoom={setInRoom} />;
+      case 'chat': return <ChatMatchInbox />;
+      case 'mine': return <ProfileCenter hostDiamonds={hostDiamonds} incomeWallet={incomeWallet} setIncomeWallet={setIncomeWallet} upiId={upiId} setUpiId={setUpiId} />;
+      default: return <ExploreDashboard setInRoom={setInRoom} />;
     }
   };
 
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-rose-50 via-white to-orange-50 px-4 py-8">
-      <section className="w-full max-w-md rounded-[2rem] border border-white bg-white/90 p-8 text-center shadow-2xl shadow-rose-100 backdrop-blur">
-        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-rose-500 text-white shadow-lg shadow-rose-200"><Heart className="h-8 w-8 fill-current" /></div>
-        <p className="mt-5 text-xs font-bold uppercase tracking-[0.2em] text-rose-500">LoveMatch</p>
-        <h1 className="mt-2 text-3xl font-black text-gray-900">{mode === "sign-in" ? "Welcome back" : "Start something real"}</h1>
-        <p className="mt-2 text-sm text-gray-500">{mode === "sign-in" ? "Sign in to continue to your matches." : "Create your private dating profile."}</p>
-        <form onSubmit={submit} className="mt-8 space-y-3 text-left">
-          <label className="relative block"><Mail className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-gray-400" /><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email address" autoComplete="email" className="w-full rounded-xl border border-gray-200 py-3 pl-10 pr-3 text-sm outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100" /></label>
-          <label className="relative block"><LockKeyhole className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-gray-400" /><input required minLength={6} type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" autoComplete={mode === "sign-in" ? "current-password" : "new-password"} className="w-full rounded-xl border border-gray-200 py-3 pl-10 pr-3 text-sm outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100" /></label>
-          <button disabled={loading} className="w-full rounded-xl bg-gray-900 py-3.5 text-sm font-bold text-white transition hover:bg-rose-600 disabled:opacity-60">{loading ? "Please wait..." : mode === "sign-in" ? "Sign in" : "Create account"}</button>
-        </form>
-        {message && <p className="mt-4 text-sm text-rose-600">{message}</p>}
-        <button type="button" onClick={() => { setMode((current) => current === "sign-in" ? "sign-up" : "sign-in"); setMessage(""); }} className="mt-5 text-xs font-bold text-rose-600">{mode === "sign-in" ? "New here? Create an account" : "Already have an account? Sign in"}</button>
-      </section>
-    </main>
-  );
-};
+  return <div className="flex min-h-screen w-full justify-center bg-slate-950 font-sans text-white"><div className="relative flex h-screen w-full max-w-md flex-col overflow-hidden bg-slate-900 shadow-2xl"><main className="flex-1 overflow-y-auto pb-20">{renderTab()}</main>{!inRoom && <footer className="absolute bottom-0 left-0 right-0 z-40 flex h-16 items-center justify-around border-t border-slate-800/80 bg-slate-900/95 px-2 backdrop-blur-md">{([{ id: 'home' as const, label: 'Home', icon: <HomeIcon size={18} /> }, { id: 'party' as const, label: 'Match', icon: <Compass size={18} /> }, { id: 'chat' as const, label: 'Chat', icon: <MessageSquare size={18} /> }, { id: 'mine' as const, label: 'Mine', icon: <User size={18} /> }]).map((tab) => <button type="button" key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex h-full w-16 flex-col items-center justify-center transition ${activeTab === tab.id ? 'scale-105 font-black text-pink-500' : 'text-slate-400'}`}>{tab.icon}<span className="mt-0.5 text-[10px]">{tab.label}</span></button>)}</footer>}<InviteBottomSheet isOpen={isShareOpen} onClose={() => setIsShareOpen(false)} /></div></div>;
+}
 
-const AuthenticatedApp = ({ session }: { session: Session }) => {
-  const [profile, setProfile] = useState<ReturnType<typeof normalizeProfile>>(null);
-  const [loading, setLoading] = useState(true);
+function ExploreDashboard({ setInRoom }: { setInRoom: (value: boolean) => void }) {
+  const [moment, setMoment] = useState('');
+  const [moments, setMoments] = useState([{ id: 1, user: 'Priya__X', text: 'Beautiful vibes tonight!', likes: 24 }]);
+  const postMoment = (event: React.FormEvent) => { event.preventDefault(); if (!moment.trim()) return; setMoments((current) => [{ id: Date.now(), user: 'You', text: moment.trim(), likes: 0 }, ...current]); setMoment(''); };
+  return <section className="space-y-4 p-3"><div className="relative flex h-32 flex-col justify-between overflow-hidden rounded-2xl border border-purple-500/20 bg-gradient-to-r from-purple-900 to-indigo-950 p-3 shadow-xl"><div><h2 className="text-base font-black text-pink-400">Magic Virgo</h2><p className="mt-0.5 text-[10px] text-slate-300">Find your destiny in a live audio room.</p></div><button type="button" onClick={() => setInRoom(true)} className="w-max rounded-full bg-pink-600 px-4 py-1.5 text-[10px] font-black">Go now</button><span className="absolute bottom-[-10px] right-2 text-8xl opacity-10">♍</span></div><div><p className="mb-2 px-1 text-[10px] font-black uppercase tracking-widest text-slate-500">Entertainment</p><div className="grid grid-cols-4 gap-1.5">{['🎲 Ludo', '🎥 Video', '🎯 Carrom', '🤝 Friends', '📦 Lucky Box', '🛡️ Family', '🏆 Ranking', '🔥 Squad'].map((item) => <button type="button" key={item} onClick={() => setInRoom(true)} className="flex items-center justify-center rounded-xl border border-slate-800 bg-slate-950 p-2 text-center text-[10px] font-bold text-slate-300">{item}</button>)}</div></div><div className="flex gap-3 overflow-x-auto pb-1">{mockProfiles.map((person) => <button type="button" key={person.name} onClick={() => setInRoom(true)} className="flex shrink-0 flex-col items-center gap-1"><img src={person.img} alt={person.name} className="h-12 w-12 rounded-full object-cover ring-2 ring-pink-500/40" /><span className="text-[9px] text-slate-400">{person.name.split(' ')[0]}</span></button>)}</div><div className="space-y-2 rounded-2xl border border-slate-800 bg-slate-950 p-3"><p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Share your moment</p><form onSubmit={postMoment} className="flex gap-2"><input value={moment} onChange={(event) => setMoment(event.target.value)} placeholder="What is on your mind?" className="min-w-0 flex-1 rounded-xl border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs outline-none focus:border-pink-500" /><button type="submit" className="rounded-xl bg-pink-600 px-3"><Plus size={14} /></button></form>{moments.map((item) => <article key={item.id} className="rounded-xl border border-slate-800/60 bg-slate-900 p-2.5"><div className="flex items-center gap-2"><div className="h-6 w-6 rounded-full bg-slate-800" /><span className="text-[11px] font-black text-pink-400">{item.user}</span></div><p className="mt-2 text-xs text-slate-200">{item.text}</p><div className="mt-2 flex h-36 items-center justify-center rounded-lg bg-gradient-to-br from-pink-900/50 to-indigo-900/50 text-4xl">✨</div><p className="mt-1 text-[10px] text-slate-500">{item.likes} likes</p></article>)}</div></section>;
+}
 
-  const loadProfile = async () => {
-    setLoading(true);
-    const localProfile = readLocalProfile(session.user.id);
-    try {
-      const { data } = await supabase.from("profiles").select("*").eq("id", session.user.id).maybeSingle();
-      const remoteProfile = normalizeProfile(session.user.id, data as Record<string, unknown> | null);
-      setProfile(remoteProfile ? {
-        ...localProfile,
-        ...remoteProfile,
-        age: remoteProfile.age ?? localProfile?.age ?? null,
-        gender: remoteProfile.gender || localProfile?.gender || '',
-        city: remoteProfile.city || localProfile?.city || '',
-        bio: remoteProfile.bio || localProfile?.bio || '',
-        interests: remoteProfile.interests.length ? remoteProfile.interests : localProfile?.interests || [],
-        avatarUrl: remoteProfile.avatarUrl || localProfile?.avatarUrl || '',
-        latitude: remoteProfile.latitude ?? localProfile?.latitude ?? null,
-        longitude: remoteProfile.longitude ?? localProfile?.longitude ?? null,
-      } : localProfile);
-    } catch {
-      setProfile(localProfile);
-    } finally {
-      setLoading(false);
-    }
-  };
+function DatingMatchCenter({ setInRoom }: DatingMatchCenterProps) { const [index, setIndex] = useState(0); const current = mockProfiles[index % mockProfiles.length]; return <section className="space-y-4 p-3"><div className="text-center"><h2 className="text-base font-black text-pink-500">Dating Match Engine</h2><p className="text-[10px] text-slate-500">Swipe or tap to meet active room profiles.</p></div><article className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-2xl"><img src={current.img} alt={current.name} className="h-80 w-full object-cover" /><div className="p-3"><h3 className="text-xl font-black">{current.name}, {current.age}</h3><p className="text-xs text-pink-300">{current.location}</p><p className="mt-2 text-xs text-slate-300">{current.bio}</p><div className="mt-4 flex gap-2"><button type="button" onClick={() => setIndex((value) => value + 1)} className="flex-1 rounded-xl border border-slate-700 py-2 text-xs font-black">Pass</button><button type="button" onClick={() => setInRoom(true)} className="flex-1 rounded-xl bg-pink-600 py-2 text-xs font-black">Match & join</button></div></div></article></section>; }
 
-  useEffect(() => { void loadProfile(); }, [session.user.id]);
+function ChatMatchInbox() { const [selected, setSelected] = useState(mockProfiles[0]); const [message, setMessage] = useState(''); return <section className="space-y-4 p-3"><div><p className="text-[10px] font-black uppercase tracking-widest text-pink-400">Your matches</p><h2 className="mt-1 text-2xl font-black">Chat inbox</h2></div><div className="grid grid-cols-[.7fr_1.3fr] gap-2"><div className="space-y-1 rounded-2xl border border-slate-800 bg-slate-950 p-2">{mockProfiles.map((person) => <button type="button" key={person.name} onClick={() => setSelected(person)} className="flex w-full items-center gap-2 rounded-xl p-2 text-left hover:bg-slate-800"><img src={person.img} alt={person.name} className="h-8 w-8 rounded-full object-cover" /><span className="truncate text-[10px] font-black">{person.name}</span></button>)}</div><div className="rounded-2xl border border-slate-800 bg-slate-950 p-3"><div className="flex items-center gap-2 border-b border-slate-800 pb-3"><img src={selected.img} alt={selected.name} className="h-10 w-10 rounded-full object-cover" /><div><p className="text-sm font-black">{selected.name}</p><p className="text-[10px] text-emerald-400">Active now</p></div></div><div className="flex min-h-56 flex-col justify-end gap-2 py-3"><p className="max-w-[85%] rounded-xl bg-slate-800 p-2 text-xs">Hey, want to join the live room?</p><p className="max-w-[85%] self-end rounded-xl bg-pink-600 p-2 text-xs">I am in. Send me the invite.</p></div><form onSubmit={(event) => { event.preventDefault(); setMessage(''); }} className="flex gap-2"><input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Write a message..." className="min-w-0 flex-1 rounded-xl border border-slate-800 bg-slate-900 px-2.5 py-2 text-xs outline-none" /><button type="submit" className="rounded-xl bg-pink-600 p-2"><Send size={14} /></button></form></div></div></section>; }
 
-  if (loading) return <div className="flex min-h-screen items-center justify-center bg-rose-50 text-sm font-bold text-gray-600">Loading your profile...</div>;
+function ProfileCenter({ hostDiamonds, incomeWallet, setIncomeWallet, upiId, setUpiId }: ProfileCenterProps) { const [status, setStatus] = useState(''); const withdraw = () => { if (!upiId.trim()) return setStatus('Enter a UPI ID first.'); if (incomeWallet <= 0) return setStatus('Your income wallet is empty.'); setIncomeWallet(0); setStatus(`Withdrawal requested for ${upiId.trim()}.`); }; return <section className="space-y-4 p-3"><div className="rounded-2xl bg-gradient-to-br from-pink-700 to-indigo-950 p-4"><div className="flex items-center gap-3"><div className="flex h-16 w-16 items-center justify-center rounded-full bg-white/15"><User size={28} /></div><div><h2 className="text-xl font-black">Your profile</h2><p className="text-xs text-white/70">Noble level 3 · verified host</p></div></div></div><div className="grid grid-cols-2 gap-2"><div className="rounded-xl bg-slate-950 p-3"><Gift className="h-4 w-4 text-pink-400" /><p className="mt-2 text-xl font-black">{hostDiamonds}</p><p className="text-[10px] text-slate-500">Host diamonds</p></div><div className="rounded-xl bg-slate-950 p-3"><DollarSign className="h-4 w-4 text-emerald-400" /><p className="mt-2 text-xl font-black">₹{incomeWallet}</p><p className="text-[10px] text-slate-500">Income wallet</p></div></div><div className="space-y-2 rounded-2xl border border-slate-800 bg-slate-950 p-3"><p className="text-xs font-black">Withdraw via UPI</p><div className="flex gap-2"><input value={upiId} onChange={(event) => setUpiId(event.target.value)} placeholder="yourname@upi" className="min-w-0 flex-1 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-xs outline-none" /><button type="button" onClick={withdraw} className="rounded-xl bg-emerald-600 px-3 text-xs font-black">Withdraw</button></div>{status && <p className="text-[10px] text-emerald-300">{status}</p>}</div></section>; }
 
-  const complete = isProfileComplete(profile);
+function LivePartyRoom({ userCoins, setUserCoins, incomeWallet, setIncomeWallet, setInRoom, setIsShareOpen }: LivePartyRoomProps) { const [message, setMessage] = useState(''); const [messages, setMessages] = useState(['Iris joined the room.', 'Wanna jump into the voice party?']); const sendMessage = (event: React.FormEvent) => { event.preventDefault(); if (!message.trim()) return; setMessages((current) => [...current, message.trim()]); setMessage(''); }; const sendGift = (price: number) => { if (userCoins < price) return; setUserCoins((current) => current - price); setIncomeWallet((current) => current + Math.round(price * 0.35)); }; return <section className="space-y-3 p-3"><div className="relative aspect-video overflow-hidden rounded-2xl bg-gradient-to-br from-pink-700 via-purple-800 to-indigo-950 p-3"><div className="flex items-center justify-between"><button type="button" onClick={() => setInRoom(false)} className="rounded-xl bg-black/25 p-2"><X size={16} /></button><p className="text-xs font-black">Midnight Voice Lounge</p><button type="button" onClick={() => setIsShareOpen(true)} className="rounded-xl bg-black/25 p-2"><Share2 size={16} /></button></div><div className="flex h-full items-center justify-center"><Mic className="h-10 w-10 text-white/60" /></div><div className="absolute inset-x-3 bottom-3 rounded-xl bg-black/30 p-2 backdrop-blur-sm"><div className="max-h-20 space-y-1 overflow-y-auto">{messages.slice(-4).map((item, index) => <p key={`${item}-${index}`} className="text-xs text-white/85">{item}</p>)}</div><form onSubmit={sendMessage} className="mt-2 flex gap-1"><input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Say something..." className="min-w-0 flex-1 rounded-lg border border-white/15 bg-black/25 px-2 py-1.5 text-xs outline-none" /><button type="submit" className="rounded-lg bg-pink-600 p-1.5"><Send size={13} /></button></form></div></div><div className="grid grid-cols-3 gap-2 rounded-2xl border border-slate-800 bg-slate-950 p-2 text-center"><p className="col-span-3 text-xs font-black">Send a gift · Host wallet ₹{incomeWallet}</p>{gifts.map((gift) => <button type="button" key={gift.name} onClick={() => sendGift(gift.price)} className="rounded-xl bg-slate-900 p-2"><span className="text-2xl">{gift.emoji}</span><span className="block text-[10px] font-black">{gift.price} coins</span></button>)}</div></section>; }
 
-  if (complete) {
-    return (
-      <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-rose-50 text-sm font-bold text-gray-600">Loading dashboard...</div>}>
-        <Dashboard session={session} onSignOut={() => void supabase.auth.signOut()} />
-      </Suspense>
-    );
-  }
-
-  return (
-    <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-rose-50 text-sm font-bold text-gray-600">Loading profile setup...</div>}>
-      <ProfileSetup session={session} onComplete={() => void loadProfile()} />
-    </Suspense>
-  );
-};
-
-const AuthCallback = () => {
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    const completeAuth = async () => {
-      try {
-        const { error } = await supabase.auth.getSession();
-        if (error) {
-          console.error(error);
-        }
-      } catch (error) {
-        console.error("Auth callback failed:", error);
-      } finally {
-        navigate("/", { replace: true });
-      }
-    };
-
-    completeAuth();
-  }, [navigate]);
-
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-pink-50 to-red-100">
-      <div className="rounded-3xl bg-white px-8 py-6 text-center shadow-lg">
-        <p className="text-lg font-bold text-gray-800">Finishing sign-in...</p>
-        <p className="mt-2 text-sm text-gray-500">Restoring your session...</p>
-      </div>
-    </div>
-  );
-};
-
-const App = () => {
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let mounted = true;
-    void supabase.auth.getSession().then(({ data }) => {
-      if (mounted) {
-        setSession(data.session);
-        setLoading(false);
-      }
-    });
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
-    return () => {
-      mounted = false;
-      data.subscription.unsubscribe();
-    };
-  }, []);
-
-  if (loading) return <div className="flex min-h-screen items-center justify-center bg-rose-50 text-sm font-bold text-gray-600">Checking secure session...</div>;
-
-  return <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-rose-50 text-sm font-bold text-gray-600">Loading app...</div>}>
-          <Routes>
-            <Route path="/" element={session ? <AuthenticatedApp session={session} /> : <AuthScreen />} />
-            <Route path="/dashboard" element={session ? <AuthenticatedApp session={session} /> : <AuthScreen />} />
-            <Route path="/auth/callback" element={<AuthCallback />} />
-            <Route path="/profile-setup" element={session ? <AuthenticatedApp session={session} /> : <AuthScreen />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </Suspense>
-      </BrowserRouter>
-    </TooltipProvider>
-  </QueryClientProvider>
-};
-
-export default App;
+function InviteBottomSheet({ isOpen, onClose }: InviteBottomSheetProps) { if (!isOpen) return null; return <div className="fixed inset-0 z-50 flex items-end bg-black/70"><section className="w-full rounded-t-2xl bg-slate-900 p-4"><div className="flex items-center justify-between"><h2 className="font-black">Invite friends</h2><button type="button" onClick={onClose}><X size={18} /></button></div><div className="mt-4 grid grid-cols-3 gap-2"><button type="button" className="rounded-xl bg-emerald-600 p-2 text-xs font-black">WhatsApp</button><button type="button" className="rounded-xl bg-blue-600 p-2 text-xs font-black">Facebook</button><button type="button" className="rounded-xl bg-pink-600 p-2 text-xs font-black">Moment</button></div></section></div>; }
