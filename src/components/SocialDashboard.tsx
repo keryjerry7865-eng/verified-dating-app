@@ -94,10 +94,6 @@ export default function SocialDashboard({ session, onSignOut }: SocialDashboardP
   useEffect(() => setUpiInput(wallet.upiId), [wallet.upiId]);
 
   useEffect(() => {
-    if (activeTab === 'party') setActiveTab('room');
-  }, [activeTab]);
-
-  useEffect(() => {
     const loadPeople = async () => {
       const local = readLocalProfile(session.user.id);
       try {
@@ -409,6 +405,38 @@ export default function SocialDashboard({ session, onSignOut }: SocialDashboardP
     return entry;
   };
 
+  const openParty = () => {
+    setActiveTab('party');
+    setPendingRoomMode(null);
+  };
+
+  const renderActiveView = () => {
+    switch (activeTab) {
+      case 'home':
+        return <HomeView people={people} onRoom={openParty} onProfile={selectProfile} onInvite={() => setInviteOpen(true)} />;
+      case 'party':
+        return <PartyView roomName={roomName} setRoomName={setRoomName} roomId={roomId} theme={roomThemes[roomTheme]} roomMode={roomMode} viewerCount={viewerCount} cameraStream={cameraStream} videoRef={videoRef} mediaError={mediaError} joinedSeats={joinedSeats} micLevels={micLevels} onMode={requestRoomMode} onSeat={(seat) => setJoinedSeats((current) => current.includes(seat) ? current.filter((item) => item !== seat) : [...current, seat])} onTheme={() => setRoomTheme((roomTheme + 1) % roomThemes.length)} onInvite={() => setInviteOpen(true)} roomChat={roomChat} roomMessage={roomMessage} setRoomMessage={setRoomMessage} onSendMessage={sendRoomMessage} audioFile={audioFile} audioUrl={audioUrl} audioPlaying={audioPlaying} audioRef={audioRef} audioVolume={audioVolume} onVolume={setAudioVolume} onFile={handleAudioFile} onToggleAudio={() => void toggleAudio()} youtubeUrl={youtubeUrl} setYoutubeUrl={setYoutubeUrl} youtubeVideoId={youtubeVideoId} onResolveYoutube={resolveYoutubeQuery} youtubeSearchLoading={youtubeSearchLoading} youtubeSearchMessage={youtubeSearchMessage} onGift={(gift) => sendGift(gift)} onOpenProfile={(person) => { setGiftTarget(person); selectProfile(person); }} />;
+      case 'chat':
+        return <ChatView people={people} onProfile={selectProfile} onGift={(gift, target) => sendGift(gift, target)} onRoom={openParty} coins={wallet.coins} />;
+      case 'profile':
+        return <ProfileView profile={profile} onEdit={() => setActiveTab('mine')} onSignOut={onSignOut} />;
+      case 'explore':
+        return <ExploreView people={people} onRoom={openParty} onProfile={selectProfile} />;
+      case 'events':
+        return <EventView onOpenRoom={openParty} />;
+      case 'moments':
+        return <MomentsView onShare={(message, image) => addMoment(message, image)} profile={profile} />;
+      case 'matching':
+        return <MatchingView people={people} onLike={(person) => { addAlert(`You liked ${person.displayName}.`); setPeople((current) => current.filter((item) => item.id !== person.id)); }} onPass={(person) => setPeople((current) => current.filter((item) => item.id !== person.id))} />;
+      case 'mine':
+        return <MineView profile={profile} wallet={wallet} onRecharge={() => setRechargeOpen(true)} onProfile={() => profile && selectProfile(profile)} onSignOut={onSignOut} onWithdraw={withdrawIncome} upiInput={upiInput} onUpiChange={setUpiInput} />;
+      case 'room':
+        return <HomeView people={people} onRoom={openParty} onProfile={selectProfile} onInvite={() => setInviteOpen(true)} />;
+      default:
+        return <HomeView people={people} onRoom={openParty} onProfile={selectProfile} onInvite={() => setInviteOpen(true)} />;
+    }
+  };
+
   if (activeTab === 'room') {
     return (
       <main className="min-h-screen bg-[#110d1d] p-4 text-white">
@@ -453,15 +481,7 @@ export default function SocialDashboard({ session, onSignOut }: SocialDashboardP
       <header className="sticky top-0 z-40 border-b border-white/10 bg-[#171125]/90 px-4 py-3 backdrop-blur-xl"><div className="mx-auto flex max-w-6xl items-center justify-between"><div className="flex items-center gap-2"><div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-rose-400 to-violet-600"><Heart className="h-5 w-5 fill-white" /></div><span className="font-black">LoveMatch</span></div><div className="flex items-center gap-2 text-xs font-black"><span className="rounded-full bg-violet-500/20 px-3 py-1.5 text-violet-200">💎 {wallet.coins}</span><span className="rounded-full bg-amber-400/20 px-3 py-1.5 text-amber-200">👑 {Math.floor(wallet.purchasedCoins / 10)}</span><button onClick={() => setRechargeOpen(true)} className="rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-3 py-1.5 text-black">Recharge</button>{profile?.avatarUrl ? <button type="button" onClick={() => setActiveTab('profile')}><img src={profile.avatarUrl} alt={profile.displayName} className="h-9 w-9 rounded-full object-cover ring-2 ring-rose-300" /></button> : <button type="button" onClick={() => setActiveTab('profile')} className="rounded-full bg-white/5 p-2"><UserRound className="h-6 w-6 text-white/60" /></button>}</div></div></header>
 
       <div className="mx-auto max-w-6xl px-4 py-6">
-        {activeTab === 'home' && <HomeView people={people} onRoom={() => { setActiveTab('party'); requestRoomMode('voice'); }} onProfile={selectProfile} onInvite={() => setInviteOpen(true)} onExplore={() => setActiveTab('explore')} onEvent={() => setActiveTab('events')} onMoments={() => setActiveTab('moments')} onMatch={() => setActiveTab('matching')} />}
-        {activeTab === 'explore' && <ExploreView people={people} onRoom={() => { setActiveTab('party'); requestRoomMode('voice'); }} onProfile={selectProfile} />}
-        {activeTab === 'events' && <EventView onOpenRoom={() => { setActiveTab('party'); requestRoomMode('voice'); }} />}
-        {activeTab === 'moments' && <MomentsView onShare={(message, image) => addMoment(message, image)} profile={profile} />}
-        {activeTab === 'matching' && <MatchingView people={people} onLike={(person) => { addAlert(`You liked ${person.displayName}.`); setPeople((current) => current.filter((item) => item.id !== person.id)); }} onPass={(person) => setPeople((current) => current.filter((item) => item.id !== person.id))} />}
-        {activeTab === 'profile' && <ProfileView profile={profile} onEdit={() => setActiveTab('mine')} onSignOut={onSignOut} />}
-        {activeTab === 'party' && <PartyView roomName={roomName} setRoomName={setRoomName} roomId={roomId} theme={roomThemes[roomTheme]} roomMode={roomMode} viewerCount={viewerCount} cameraStream={cameraStream} videoRef={videoRef} mediaError={mediaError} joinedSeats={joinedSeats} micLevels={micLevels} onMode={requestRoomMode} onSeat={(seat) => setJoinedSeats((current) => current.includes(seat) ? current.filter((item) => item !== seat) : [...current, seat])} onTheme={() => setRoomTheme((roomTheme + 1) % roomThemes.length)} onInvite={() => setInviteOpen(true)} roomChat={roomChat} roomMessage={roomMessage} setRoomMessage={setRoomMessage} onSendMessage={sendRoomMessage} audioFile={audioFile} audioUrl={audioUrl} audioPlaying={audioPlaying} audioRef={audioRef} audioVolume={audioVolume} onVolume={setAudioVolume} onFile={handleAudioFile} onToggleAudio={() => void toggleAudio()} youtubeUrl={youtubeUrl} setYoutubeUrl={setYoutubeUrl} youtubeVideoId={youtubeVideoId} onResolveYoutube={resolveYoutubeQuery} youtubeSearchLoading={youtubeSearchLoading} youtubeSearchMessage={youtubeSearchMessage} onGift={(gift) => sendGift(gift)} onOpenProfile={(person) => { setGiftTarget(person); selectProfile(person); }} />}
-        {activeTab === 'chat' && <ChatView people={people} onProfile={selectProfile} onGift={(gift, target) => sendGift(gift, target)} onRoom={() => { setActiveTab('party'); requestRoomMode('voice'); }} coins={wallet.coins} />}
-        {activeTab === 'mine' && <MineView profile={profile} wallet={wallet} onRecharge={() => setRechargeOpen(true)} onProfile={() => profile && selectProfile(profile)} onSignOut={onSignOut} onWithdraw={withdrawIncome} upiInput={upiInput} onUpiChange={setUpiInput} />}
+        {renderActiveView()}
       </div>
 
       <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-[#171326]/95 px-3 py-2 backdrop-blur-xl"><div className="mx-auto grid max-w-lg grid-cols-4 gap-1">{tabs.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setActiveTab(id)} className={`flex flex-col items-center gap-1 rounded-xl py-2 text-[11px] font-bold ${activeTab === id ? 'bg-rose-500/15 text-rose-300' : 'text-white/45'}`}><Icon className="h-5 w-5" />{label}</button>)}</div></nav>
