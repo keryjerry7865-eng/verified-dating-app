@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -6,11 +6,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
 import { Heart, LockKeyhole, Mail } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
-import Dashboard from "./components/Dashboard";
-import ProfileSetup from "./components/ProfileSetup";
-import NotFound from "./pages/NotFound";
 import { supabase, supabaseConfigError } from "./supabaseClient";
 import { isProfileComplete, normalizeProfile, readLocalProfile } from "./lib/profileFallback";
+
+const Dashboard = lazy(() => import("./components/Dashboard"));
+const ProfileSetup = lazy(() => import("./components/ProfileSetup"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
 
@@ -116,10 +117,18 @@ const AuthenticatedApp = ({ session }: { session: Session }) => {
   const complete = isProfileComplete(profile);
 
   if (complete) {
-    return <Dashboard session={session} onSignOut={() => void supabase.auth.signOut()} />;
+    return (
+      <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-rose-50 text-sm font-bold text-gray-600">Loading dashboard...</div>}>
+        <Dashboard session={session} onSignOut={() => void supabase.auth.signOut()} />
+      </Suspense>
+    );
   }
 
-  return <ProfileSetup session={session} onComplete={() => void loadProfile()} />;
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-rose-50 text-sm font-bold text-gray-600">Loading profile setup...</div>}>
+      <ProfileSetup session={session} onComplete={() => void loadProfile()} />
+    </Suspense>
+  );
 };
 
 const AuthCallback = () => {
@@ -178,14 +187,15 @@ const App = () => {
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <Routes>
-          <Route path="/" element={session ? <AuthenticatedApp session={session} /> : <AuthScreen />} />
-          <Route path="/dashboard" element={session ? <AuthenticatedApp session={session} /> : <AuthScreen />} />
-          <Route path="/auth/callback" element={<AuthCallback />} />
-          <Route path="/profile-setup" element={session ? <AuthenticatedApp session={session} /> : <AuthScreen />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+        <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-rose-50 text-sm font-bold text-gray-600">Loading app...</div>}>
+          <Routes>
+            <Route path="/" element={session ? <AuthenticatedApp session={session} /> : <AuthScreen />} />
+            <Route path="/dashboard" element={session ? <AuthenticatedApp session={session} /> : <AuthScreen />} />
+            <Route path="/auth/callback" element={<AuthCallback />} />
+            <Route path="/profile-setup" element={session ? <AuthenticatedApp session={session} /> : <AuthScreen />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Suspense>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

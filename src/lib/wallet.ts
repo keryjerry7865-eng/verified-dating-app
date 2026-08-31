@@ -35,8 +35,6 @@ export const readWallet = (userId: string): WalletState => {
   }
 };
 
-export const calculateGiftCommission = (giftValue: number) => Math.round(giftValue * 0.35);
-
 export const writeWallet = (userId: string, wallet: WalletState) => {
   try {
     window.localStorage.setItem(walletKey(userId), JSON.stringify(wallet));
