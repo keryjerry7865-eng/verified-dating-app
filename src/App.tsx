@@ -6,12 +6,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
 import { Heart, LockKeyhole, Mail } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
-import SocialDashboard from "./components/SocialDashboard";
-const Dashboard = SocialDashboard;
+import Dashboard from "./components/Dashboard";
 import ProfileSetup from "./components/ProfileSetup";
 import NotFound from "./pages/NotFound";
 import { supabase, supabaseConfigError } from "./supabaseClient";
-import { normalizeProfile, readLocalProfile } from "./lib/profileFallback";
+import { isProfileComplete, normalizeProfile, readLocalProfile } from "./lib/profileFallback";
 
 const queryClient = new QueryClient();
 
@@ -84,7 +83,6 @@ const AuthScreen = () => {
 const AuthenticatedApp = ({ session }: { session: Session }) => {
   const [profile, setProfile] = useState<ReturnType<typeof normalizeProfile>>(null);
   const [loading, setLoading] = useState(true);
-  const roomId = new URLSearchParams(window.location.search).get('room');
 
   const loadProfile = async () => {
     setLoading(true);
@@ -115,10 +113,13 @@ const AuthenticatedApp = ({ session }: { session: Session }) => {
 
   if (loading) return <div className="flex min-h-screen items-center justify-center bg-rose-50 text-sm font-bold text-gray-600">Loading your profile...</div>;
 
-  const complete = Boolean(profile?.age && profile.age >= 18 && profile.gender && profile.city && profile.avatarUrl);
-  return complete
-    ? <Dashboard session={session} onSignOut={() => void supabase.auth.signOut()} initialRoomId={roomId || undefined} />
-    : <ProfileSetup session={session} onComplete={() => void loadProfile()} />;
+  const complete = isProfileComplete(profile);
+
+  if (complete) {
+    return <Dashboard session={session} onSignOut={() => void supabase.auth.signOut()} />;
+  }
+
+  return <ProfileSetup session={session} onComplete={() => void loadProfile()} />;
 };
 
 const AuthCallback = () => {
@@ -179,6 +180,7 @@ const App = () => {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={session ? <AuthenticatedApp session={session} /> : <AuthScreen />} />
+          <Route path="/dashboard" element={session ? <AuthenticatedApp session={session} /> : <AuthScreen />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
           <Route path="/profile-setup" element={session ? <AuthenticatedApp session={session} /> : <AuthScreen />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

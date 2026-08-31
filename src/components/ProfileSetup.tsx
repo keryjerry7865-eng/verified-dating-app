@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Camera, MapPin, UserRound } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../supabaseClient';
@@ -10,8 +11,14 @@ type ProfileSetupProps = {
 };
 
 const interests = ['Travel', 'Music', 'Movies', 'Fitness', 'Food', 'Art', 'Gaming', 'Reading'];
+const majorIndianCities = [
+  'Mumbai', 'Delhi', 'Bengaluru', 'Bangalore', 'Hyderabad', 'Chennai', 'Kolkata', 'Pune', 'Ahmedabad',
+  'Jaipur', 'Lucknow', 'Kanpur', 'Nagpur', 'Indore', 'Thane', 'Bhopal', 'Visakhapatnam', 'Patna', 'Vadodara',
+  'Ghaziabad', 'Ludhiana', 'Coimbatore', 'Agra', 'Nashik', 'Faridabad', 'Meerut', 'Rajkot', 'Kalyan', 'Srinagar'
+];
 
 export default function ProfileSetup({ session, onComplete }: ProfileSetupProps) {
+  const navigate = useNavigate();
   const [age, setAge] = useState('');
   const [gender, setGender] = useState('');
   const [city, setCity] = useState('');
@@ -73,7 +80,7 @@ export default function ProfileSetup({ session, onComplete }: ProfileSetupProps)
         }
       }
 
-      writeLocalProfile({
+      const profileData = {
         id: session.user.id,
         age: Number(age),
         gender,
@@ -84,14 +91,33 @@ export default function ProfileSetup({ session, onComplete }: ProfileSetupProps)
         latitude: latitude ? Number(latitude) : null,
         longitude: longitude ? Number(longitude) : null,
         matchDistance: 25,
+      };
+
+      writeLocalProfile({
+        ...profileData,
+        avatarUrl: profileData.avatarUrl || '',
       });
 
       try {
-        await supabase.from('profiles').upsert({ id: session.user.id }, { onConflict: 'id' });
+        await supabase.from('profiles').upsert({
+          id: session.user.id,
+          age: profileData.age,
+          gender: profileData.gender,
+          city: profileData.city,
+          bio: profileData.bio,
+          interests: profileData.interests,
+          avatar_url: profileData.avatarUrl || null,
+          latitude: profileData.latitude,
+          longitude: profileData.longitude,
+          match_distance: profileData.matchDistance,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'id' });
       } catch {
         // Local profile data keeps onboarding usable when remote columns are unavailable.
       }
+
       onComplete();
+      navigate('/dashboard', { replace: true });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to save your profile.');
     } finally {
@@ -124,7 +150,23 @@ export default function ProfileSetup({ session, onComplete }: ProfileSetupProps)
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="text-sm font-bold text-gray-700">Age<input required min="18" max="100" type="number" value={age} onChange={(event) => setAge(event.target.value)} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-3 font-normal outline-none focus:border-rose-400" /></label>
             <label className="text-sm font-bold text-gray-700">Gender<select required value={gender} onChange={(event) => setGender(event.target.value)} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-3 font-normal outline-none focus:border-rose-400"><option value="">Choose one</option><option>Woman</option><option>Man</option><option>Non-binary</option><option>Prefer not to say</option></select></label>
-            <label className="text-sm font-bold text-gray-700">City / location<input required value={city} onChange={(event) => setCity(event.target.value)} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-3 font-normal outline-none focus:border-rose-400" /></label>
+            <label className="text-sm font-bold text-gray-700">
+              City / location
+              <input
+                required
+                list="india-city-suggestions"
+                value={city}
+                onChange={(event) => setCity(event.target.value)}
+                placeholder="Mumbai, Delhi, Bengaluru..."
+                autoComplete="off"
+                className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-3 font-normal outline-none focus:border-rose-400"
+              />
+              <datalist id="india-city-suggestions">
+                {majorIndianCities.map((cityName) => (
+                  <option key={cityName} value={cityName} />
+                ))}
+              </datalist>
+            </label>
           </div>
 
           <label className="block text-sm font-bold text-gray-700">Short bio<textarea value={bio} onChange={(event) => setBio(event.target.value)} maxLength={280} rows={3} placeholder="A little about you" className="mt-2 w-full resize-none rounded-xl border border-gray-200 px-3 py-3 font-normal outline-none focus:border-rose-400" /></label>
