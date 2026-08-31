@@ -11,9 +11,13 @@ export type WalletState = {
   coins: number;
   purchasedCoins: number;
   receivedGifts: GiftRecord[];
+  incomeWallet: number;
+  upiId: string;
 };
 
 const walletKey = (userId: string) => `lovematch-wallet:${userId}`;
+
+export const calculateGiftCommission = (giftValue: number) => Math.round(giftValue * 0.35);
 
 export const readWallet = (userId: string): WalletState => {
   try {
@@ -23,11 +27,15 @@ export const readWallet = (userId: string): WalletState => {
       coins: typeof stored.coins === 'number' ? stored.coins : 0,
       purchasedCoins: typeof stored.purchasedCoins === 'number' ? stored.purchasedCoins : 0,
       receivedGifts: Array.isArray(stored.receivedGifts) ? stored.receivedGifts : [],
+      incomeWallet: typeof stored.incomeWallet === 'number' ? stored.incomeWallet : 0,
+      upiId: typeof stored.upiId === 'string' ? stored.upiId : 'warsi.1@ptaxis',
     };
   } catch {
-    return { coins: 0, purchasedCoins: 0, receivedGifts: [] };
+    return { coins: 0, purchasedCoins: 0, receivedGifts: [], incomeWallet: 0, upiId: 'warsi.1@ptaxis' };
   }
 };
+
+export const calculateGiftCommission = (giftValue: number) => Math.round(giftValue * 0.35);
 
 export const writeWallet = (userId: string, wallet: WalletState) => {
   try {

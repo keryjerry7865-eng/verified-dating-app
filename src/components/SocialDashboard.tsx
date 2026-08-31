@@ -4,7 +4,7 @@ import { Bell, Camera, ChevronLeft, Coins, Crown, Gift, Heart, Home, LogOut, Mes
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../supabaseClient';
 import { normalizeProfile, readLocalProfile, type LocalProfile } from '../lib/profileFallback';
-import { readWallet, writeWallet, type GiftRecord, type WalletState } from '../lib/wallet';
+import { calculateGiftCommission, readWallet, writeWallet, type GiftRecord, type WalletState } from '../lib/wallet';
 import LivePartyRoom from './LivePartyRoom';
 
 type SocialDashboardProps = { session: Session; onSignOut: () => void };
@@ -264,7 +264,14 @@ export default function SocialDashboard({ session, onSignOut }: SocialDashboardP
       return;
     }
     const record: GiftRecord = { id: crypto.randomUUID(), gift: gift.name, emoji: gift.emoji, coins: gift.price, recipientId: target?.id || roomId, createdAt: new Date().toISOString() };
-    setWallet((current) => ({ ...current, coins: current.coins - gift.price, receivedGifts: [...current.receivedGifts, record] }));
+    const commission = calculateGiftCommission(gift.price);
+    setWallet((current) => ({
+      ...current,
+      coins: current.coins - gift.price,
+      receivedGifts: [...current.receivedGifts, record],
+      incomeWallet: current.incomeWallet + commission,
+      upiId: current.upiId || 'warsi.1@ptaxis',
+    }));
     setActiveGift(gift);
     addAlert(`${gift.name} sent${target ? ` to ${target.displayName}` : ''}.`);
   };
@@ -432,7 +439,7 @@ export default function SocialDashboard({ session, onSignOut }: SocialDashboardP
         {activeTab === 'profile' && <ProfileView profile={profile} onEdit={() => setActiveTab('mine')} onSignOut={onSignOut} />}
         {activeTab === 'party' && <PartyView roomName={roomName} setRoomName={setRoomName} roomId={roomId} theme={roomThemes[roomTheme]} roomMode={roomMode} viewerCount={viewerCount} cameraStream={cameraStream} videoRef={videoRef} mediaError={mediaError} joinedSeats={joinedSeats} micLevels={micLevels} onMode={requestRoomMode} onSeat={(seat) => setJoinedSeats((current) => current.includes(seat) ? current.filter((item) => item !== seat) : [...current, seat])} onTheme={() => setRoomTheme((roomTheme + 1) % roomThemes.length)} onInvite={() => setInviteOpen(true)} roomChat={roomChat} roomMessage={roomMessage} setRoomMessage={setRoomMessage} onSendMessage={sendRoomMessage} audioFile={audioFile} audioUrl={audioUrl} audioPlaying={audioPlaying} audioRef={audioRef} audioVolume={audioVolume} onVolume={setAudioVolume} onFile={handleAudioFile} onToggleAudio={() => void toggleAudio()} youtubeUrl={youtubeUrl} setYoutubeUrl={setYoutubeUrl} youtubeVideoId={youtubeVideoId} onResolveYoutube={resolveYoutubeQuery} youtubeSearchLoading={youtubeSearchLoading} youtubeSearchMessage={youtubeSearchMessage} onGift={(gift) => sendGift(gift)} onOpenProfile={(person) => { setGiftTarget(person); selectProfile(person); }} />}
         {activeTab === 'chat' && <ChatView people={people} onProfile={selectProfile} onGift={(gift, target) => sendGift(gift, target)} onRoom={() => { setActiveTab('party'); requestRoomMode('voice'); }} coins={wallet.coins} />}
-        {activeTab === 'mine' && <MineView profile={profile} wallet={wallet} onRecharge={() => setRechargeOpen(true)} onProfile={() => profile && selectProfile(profile)} onSignOut={onSignOut} />}
+        {activeTab === 'mine' && <MineView profile={profile} wallet={wallet} onRecharge={() => setRechargeOpen(true)} onProfile={() => profile && selectProfile(profile)} onSignOut={onSignOut} onUpdateWallet={(nextWallet) => setWallet(nextWallet)} />}
       </div>
 
       <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-[#171326]/95 px-3 py-2 backdrop-blur-xl"><div className="mx-auto grid max-w-lg grid-cols-4 gap-1">{tabs.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setActiveTab(id)} className={`flex flex-col items-center gap-1 rounded-xl py-2 text-[11px] font-bold ${activeTab === id ? 'bg-rose-500/15 text-rose-300' : 'text-white/45'}`}><Icon className="h-5 w-5" />{label}</button>)}</div></nav>
@@ -460,7 +467,11 @@ function EventView({ onOpenRoom }: { onOpenRoom: () => void }) { const events = 
 function MomentsView({ onShare, profile }: { onShare: (message: string, image?: string) => void; profile: SocialProfile | null }) {
   const [text, setText] = useState('');
   const [image, setImage] = useState('');
-  const [items, setItems] = useState<Array<{ id: string; author: string; content: string; image?: string }>>([]);
+  const [mediaType, setMediaType] = useState<'image' | 'video' | 'none'>('none');
+  const [mediaPreview, setMediaPreview] = useState('');
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [items, setItems] = useState<Array<{ id: string; author: string; content: string; image?: string; type?: 'image' | 'video' }>>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const loadMoments = async () => {
@@ -472,31 +483,46 @@ function MomentsView({ onShare, profile }: { onShare: (message: string, image?: 
           author: String(item.author_name || 'Anonymous'),
           content: String(item.content || 'Shared a moment.'),
           image: item.image_url ? String(item.image_url) : undefined,
+          type: item.image_url && /\.(mp4|webm|mov)$/i.test(String(item.image_url)) ? 'video' : 'image',
         })));
       } catch {
-        setItems(profile ? [{ id: 'mine', author: profile.displayName, content: profile.bio || 'Just joined LoveMatch and ready to meet someone amazing.', image: profile.avatarUrl }] : []);
+        setItems(profile ? [{ id: 'mine', author: profile.displayName, content: profile.bio || 'Just joined LoveMatch and ready to meet someone amazing.', image: profile.avatarUrl, type: 'image' }] : []);
       }
     };
     void loadMoments();
   }, [profile]);
 
+  const handleFilePick = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setMediaFile(file);
+    const previewUrl = URL.createObjectURL(file);
+    setMediaPreview(previewUrl);
+    setMediaType(file.type.startsWith('video/') ? 'video' : 'image');
+    setImage(previewUrl);
+  };
+
   const handleShare = async () => {
-    if (!text.trim() && !image.trim()) return;
-    const payload = { user_id: profile?.id || session.user.id, author_name: profile?.displayName || 'You', content: text.trim() || 'Shared a moment.', image_url: image.trim() || null };
+    if (!text.trim() && !mediaPreview) return;
+    const payload = { user_id: profile?.id || session.user.id, author_name: profile?.displayName || 'You', content: text.trim() || 'Shared a moment.', image_url: image.trim() || mediaPreview || null };
     try {
       await supabase.from('moments').insert(payload);
     } catch {
       // Fallback: UI still works without remote storage.
     }
-    onShare(text, image);
-    setItems((current) => [{ id: crypto.randomUUID(), author: profile?.displayName || 'You', content: text.trim() || 'Shared a moment.', image: image.trim() || profile?.avatarUrl }, ...current]);
+    onShare(text, image || mediaPreview);
+    setItems((current) => [{ id: crypto.randomUUID(), author: profile?.displayName || 'You', content: text.trim() || 'Shared a moment.', image: image.trim() || mediaPreview || profile?.avatarUrl, type: mediaType === 'video' ? 'video' : 'image' }, ...current]);
     setText('');
     setImage('');
+    setMediaPreview('');
+    setMediaType('none');
+    setMediaFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  return <section className="space-y-5"><div className="rounded-3xl bg-white/5 p-5 ring-1 ring-white/10"><p className="text-[10px] font-black uppercase tracking-[0.25em] text-rose-300">Moments</p><h1 className="mt-2 text-3xl font-black">Share a moment</h1></div><div className="rounded-3xl bg-white/5 p-5 ring-1 ring-white/10"><textarea value={text} onChange={(event) => setText(event.target.value)} rows={4} placeholder="Share a photo, update, or story..." className="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-sm text-white outline-none" /><div className="mt-3 flex items-center gap-2"><input value={image} onChange={(event) => setImage(event.target.value)} placeholder="Paste image URL (optional)" className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs outline-none" /><button onClick={handleShare} className="rounded-xl bg-rose-500 px-4 py-2 text-xs font-black">Post</button></div></div><div className="rounded-3xl bg-white/5 p-5 ring-1 ring-white/10"><h2 className="text-xl font-black">Recent moments</h2><div className="mt-4 space-y-3">{items.length ? items.map((moment) => <div key={moment.id} className="rounded-2xl bg-black/20 p-3"><p className="text-sm font-black">{moment.author}</p><p className="mt-2 text-sm text-white/70">{moment.content}</p>{moment.image && <img src={moment.image} alt={moment.author} className="mt-3 h-40 w-full rounded-2xl object-cover" />}</div>) : <div className="rounded-2xl bg-black/20 p-3 text-sm text-white/60">No moments yet — be the first to share one.</div>}</div></div></section>; }
+  return <section className="space-y-4"><div className="rounded-2xl bg-white/5 p-4 ring-1 ring-white/10"><p className="text-[10px] font-black uppercase tracking-[0.25em] text-rose-300">Moments</p><h1 className="mt-2 text-2xl font-black">Share a moment</h1></div><div className="rounded-2xl bg-white/5 p-4 ring-1 ring-white/10"><div className="flex flex-col gap-3 md:flex-row"><div className="flex-1"><textarea value={text} onChange={(event) => setText(event.target.value)} rows={4} placeholder="Share a photo, update, or story..." className="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-sm text-white outline-none" /></div><div className="w-full md:max-w-[220px]">{mediaPreview ? <div className="overflow-hidden rounded-2xl bg-black/20 ring-1 ring-white/10">{mediaType === 'video' ? <video src={mediaPreview} controls className="h-32 w-full object-cover" /> : <img src={mediaPreview} alt="Moment preview" className="h-32 w-full object-cover" />}</div> : <button type="button" onClick={() => fileInputRef.current?.click()} className="flex h-32 w-full items-center justify-center rounded-2xl border border-dashed border-white/15 bg-black/15 text-xs font-bold text-white/60">Add photo or video</button>}<input ref={fileInputRef} type="file" accept="image/*,video/*" onChange={handleFilePick} className="hidden" /></div></div><div className="mt-3 flex items-center gap-2"><button type="button" onClick={() => fileInputRef.current?.click()} className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/70">Upload media</button><button onClick={handleShare} className="ml-auto rounded-xl bg-rose-500 px-4 py-2 text-xs font-black">Post</button></div></div><div className="rounded-2xl bg-white/5 p-4 ring-1 ring-white/10"><h2 className="text-lg font-black">Recent moments</h2><div className="mt-3 space-y-3">{items.length ? items.map((moment) => <div key={moment.id} className="rounded-2xl bg-black/20 p-3"><p className="text-sm font-black">{moment.author}</p><p className="mt-2 text-sm text-white/70">{moment.content}</p>{moment.image && (moment.type === 'video' ? <video src={moment.image} controls className="mt-3 h-40 w-full rounded-2xl object-cover" /> : <img src={moment.image} alt={moment.author} className="mt-3 h-40 w-full rounded-2xl object-cover" />)}</div>) : <div className="rounded-2xl bg-black/20 p-3 text-sm text-white/60">No moments yet — be the first to share one.</div>}</div></div></section>; }
 
-function MatchingView({ people, onLike, onPass }: { people: SocialProfile[]; onLike: (person: SocialProfile) => void; onPass: (person: SocialProfile) => void }) { const [card, setCard] = useState<SocialProfile | null>(people[0] || null); return <section className="space-y-5"><div className="rounded-3xl bg-white/5 p-5 ring-1 ring-white/10"><p className="text-[10px] font-black uppercase tracking-[0.25em] text-rose-300">Matching</p><h1 className="mt-2 text-3xl font-black">People you may like</h1></div>{card ? <div className="rounded-[2rem] bg-gradient-to-br from-rose-500/20 via-violet-900 to-[#170f25] p-5 ring-1 ring-white/10"><div className="flex h-72 items-end rounded-[1.5rem] bg-gradient-to-br from-violet-800 via-rose-500 to-orange-500 p-4" style={{ backgroundImage: card.avatarUrl ? `linear-gradient(135deg, rgba(0,0,0,0.1), rgba(0,0,0,0.45)), url(${card.avatarUrl})` : undefined, backgroundSize: 'cover' }}><div className="w-full rounded-2xl bg-black/30 p-4 backdrop-blur-sm"><h2 className="text-2xl font-black">{card.displayName}</h2><p className="mt-1 text-sm text-white/70">{card.city || 'Near you'} · {card.age || 25}</p></div></div><div className="mt-5 flex gap-3"><button onClick={() => { onPass(card); setCard(people.find((item) => item.id !== card.id) || null); }} className="flex-1 rounded-2xl border border-white/15 bg-black/20 py-3 text-sm font-black">Pass</button><button onClick={() => { onLike(card); setCard(people.find((item) => item.id !== card.id) || null); }} className="flex-1 rounded-2xl bg-rose-500 py-3 text-sm font-black">Like</button></div></div> : <div className="rounded-3xl bg-white/5 p-6 text-center text-white/60 ring-1 ring-white/10">You’ve reviewed everyone for now. Try coming back later.</div>}</section>; }
+function MatchingView({ people, onLike, onPass }: { people: SocialProfile[]; onLike: (person: SocialProfile) => void; onPass: (person: SocialProfile) => void }) { const [card, setCard] = useState<SocialProfile | null>(people[0] || null); return <section className="space-y-4"><div className="rounded-2xl bg-white/5 p-4 ring-1 ring-white/10"><p className="text-[10px] font-black uppercase tracking-[0.25em] text-rose-300">Matching</p><h1 className="mt-2 text-2xl font-black">People you may like</h1></div>{card ? <div className="rounded-[1.75rem] border border-white/10 bg-gradient-to-br from-rose-500/15 via-violet-900/80 to-[#170f25] p-3 shadow-2xl"><div className="flex h-72 items-end rounded-[1.5rem] bg-gradient-to-br from-violet-800 via-rose-500 to-orange-500 p-4" style={{ backgroundImage: card.avatarUrl ? `linear-gradient(135deg, rgba(0,0,0,0.15), rgba(0,0,0,0.55)), url(${card.avatarUrl})` : undefined, backgroundSize: 'cover' }}><div className="w-full rounded-2xl bg-black/30 p-3 backdrop-blur-sm"><h2 className="text-xl font-black">{card.displayName}</h2><p className="mt-1 text-xs text-white/70">{card.city || 'Near you'} · {card.age || 25}</p></div></div><div className="mt-4 grid grid-cols-2 gap-3"><button onClick={() => { onPass(card); setCard(people.find((item) => item.id !== card.id) || null); }} className="rounded-2xl border border-white/15 bg-black/20 py-3 text-sm font-black text-white/80">Pass</button><button onClick={() => { onLike(card); setCard(people.find((item) => item.id !== card.id) || null); }} className="rounded-2xl bg-rose-500 py-3 text-sm font-black text-white">Match</button></div></div> : <div className="rounded-2xl bg-white/5 p-5 text-center text-white/60 ring-1 ring-white/10">You’ve reviewed everyone for now. Try coming back later.</div>}</section>; }
 
 function ProfileView({ profile, onEdit, onSignOut }: { profile: SocialProfile | null; onEdit: () => void; onSignOut: () => void }) { return <section className="space-y-5"><div className="rounded-[2rem] bg-gradient-to-br from-violet-900 via-fuchsia-700 to-rose-600 p-6"><div className="flex items-center gap-4"><div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-3xl bg-white/15">{profile?.avatarUrl ? <img src={profile.avatarUrl} alt={profile.displayName} className="h-full w-full object-cover" /> : <UserRound className="h-8 w-8" />}</div><div><h1 className="text-2xl font-black">{profile?.displayName || 'Your profile'}</h1><p className="mt-1 text-sm text-white/70">{profile?.city || 'City not set'} · {profile?.age || 'Age not set'}</p></div></div></div><div className="grid gap-3 md:grid-cols-3">{[['Likes', profile?.likes ?? 0], ['Views', profile?.views ?? 0], ['Matches', 12]].map(([label, value]) => <div key={String(label)} className="rounded-3xl bg-white/5 p-4 ring-1 ring-white/10"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-rose-300">{String(label)}</p><p className="mt-2 text-3xl font-black">{String(value)}</p></div>)}</div><div className="rounded-3xl bg-white/5 p-5 ring-1 ring-white/10"><p className="text-[10px] font-black uppercase tracking-[0.25em] text-rose-300">Bio</p><p className="mt-2 text-sm text-white/70">{profile?.bio || 'Tell people a little more about yourself and your interests.'}</p><div className="mt-4 flex gap-2">{(profile?.interests || ['Travel', 'Music']).slice(0, 4).map((item) => <span key={item} className="rounded-full bg-white/10 px-3 py-1.5 text-[10px] font-black text-white/75">{item}</span>)}</div></div><div className="flex gap-3"><button onClick={onEdit} className="flex-1 rounded-2xl bg-white/10 py-3 text-sm font-black">Edit profile</button><button onClick={onSignOut} className="flex-1 rounded-2xl bg-rose-500 py-3 text-sm font-black">Sign out</button></div></section>; }
 
@@ -506,7 +532,21 @@ function ChatView({ people, onProfile, onGift, onRoom, coins }: { people: Social
 
 function MineView({ profile, wallet, onRecharge, onProfile, onSignOut }: { profile: SocialProfile | null; wallet: WalletState; onRecharge: () => void; onProfile: () => void; onSignOut: () => void }) { return <section className="space-y-5"><button onClick={onProfile} className="flex w-full items-center gap-4 rounded-3xl bg-gradient-to-br from-violet-800 via-fuchsia-700 to-rose-600 p-6 text-left"><div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-3xl bg-white/15">{profile?.avatarUrl ? <img src={profile.avatarUrl} alt={profile.displayName} className="h-full w-full object-cover" /> : <UserRound className="h-9 w-9" />}</div><div><h1 className="text-2xl font-black">{profile?.displayName || 'Your profile'}</h1><p className="mt-1 text-xs text-white/70">Noble level 3 · VIP profile</p><span className="mt-2 inline-block rounded-full bg-amber-300 px-2 py-1 text-[10px] font-black text-amber-950">NOBLE 3</span></div></button><div className="grid grid-cols-3 gap-3">{[['Diamonds', wallet.purchasedCoins * 10, Crown], ['Coins', wallet.coins, Coins], ['Gifts received', wallet.receivedGifts.length, Gift]].map(([label, value, Icon]) => <div key={String(label)} className="rounded-2xl bg-white/5 p-4 ring-1 ring-white/10"><IconRenderer icon={Icon as typeof Coins} /><p className="mt-3 text-xl font-black">{String(value)}</p><p className="text-[10px] font-bold text-white/45">{String(label)}</p></div>)}</div><button onClick={onRecharge} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 py-4 font-black text-black"><Wallet className="h-5 w-5" />Big recharge bonus</button><div className="rounded-3xl bg-white/5 p-5 ring-1 ring-white/10"><h2 className="font-black">User Moments</h2><div className="mt-4 flex h-28 items-center justify-center rounded-2xl border border-dashed border-white/15 text-xs text-white/40">Your moments will appear here.</div></div><button onClick={onSignOut} className="w-full rounded-xl border border-white/10 py-3 text-sm font-bold text-white/50">Sign out</button></section>; }
 
-function RechargeModal({ open, onClose, onPurchase }: { open: boolean; onClose: () => void; onPurchase: () => void }) { if (!open) return null; return <Modal title="Big recharge bonus" onClose={onClose}><div className="rounded-3xl bg-gradient-to-br from-amber-300 via-orange-500 to-rose-600 p-5 text-center text-black"><p className="text-xs font-black uppercase tracking-widest">Limited-time offer</p><p className="mt-2 text-5xl font-black">00:58:53</p><p className="mt-2 text-sm font-bold">1,000 diamonds + bonus items</p><button onClick={onPurchase} className="mt-5 w-full rounded-2xl bg-black py-4 text-lg font-black text-amber-200">INR 57 · Recharge now</button></div><div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs text-white/60"><div className="rounded-2xl bg-white/5 p-3">👑<br />1 day crown</div><div className="rounded-2xl bg-white/5 p-3">💬<br />2 day bubbles</div><div className="rounded-2xl bg-white/5 p-3">🖼️<br />3 day frame</div></div></Modal>; }
+function RechargeModal({ open, onClose, onPurchase }: { open: boolean; onClose: () => void; onPurchase: () => void }) { 
+  const [copied, setCopied] = useState(false);
+  const upiId = 'warsi.1@ptaxis';
+  const copyUpi = async () => {
+    try {
+      await navigator.clipboard.writeText(upiId);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  if (!open) return null;
+  return <Modal title="Recharge wallet" onClose={onClose}><div className="rounded-3xl bg-gradient-to-br from-amber-300 via-orange-500 to-rose-600 p-4 text-center text-black"><p className="text-[10px] font-black uppercase tracking-[0.2em]">Limited-time offer</p><p className="mt-2 text-4xl font-black">₹57</p><p className="mt-2 text-sm font-bold">1,000 diamonds + bonus items</p><button onClick={onPurchase} className="mt-5 w-full rounded-2xl bg-black py-3 text-sm font-black text-amber-200">Recharge now</button></div><div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 p-3"><div className="flex items-center justify-between gap-3"><div className="flex-1"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-200">UPI QR</p><p className="mt-1 text-xs text-white/60">MD DILSHAD WARSI</p></div><button type="button" onClick={copyUpi} className="rounded-xl bg-white/10 px-3 py-2 text-[10px] font-black text-white">{copied ? 'Copied' : 'Copy UPI ID'}</button></div><div className="mt-3 flex items-center gap-3 rounded-2xl bg-white p-2 shadow-inner"><img src="/recharge-qr.jpg" alt="UPI QR code" className="h-28 w-28 rounded-xl object-cover" /><div className="min-w-0 flex-1"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">UPI ID</p><p className="mt-1 break-all text-xs font-bold text-gray-700">{upiId}</p></div></div></div><div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs text-white/60"><div className="rounded-xl bg-white/5 p-2">👑<br />1 day crown</div><div className="rounded-xl bg-white/5 p-2">💬<br />2 day bubbles</div><div className="rounded-xl bg-white/5 p-2">🖼️<br />3 day frame</div></div></Modal>; }
 
 function InviteSheet({ open, onClose, people }: { open: boolean; onClose: () => void; people: SocialProfile[] }) { if (!open) return null; return <div className="fixed inset-0 z-[70] flex items-end bg-black/60"><motion.section initial={{ y: '100%' }} animate={{ y: 0 }} className="w-full rounded-t-[2rem] bg-[#211a32] p-6"><div className="mx-auto max-w-2xl"><div className="flex items-center justify-between"><h2 className="text-2xl font-black">Invite friends</h2><button onClick={onClose}><X /></button></div><div className="mt-5 grid grid-cols-4 gap-3 text-center text-xs font-bold"><span>🟢<br />WhatsApp</span><span>🔵<br />Facebook</span><span>🌈<br />Instagram</span><span>✨<br />Moment</span></div><div className="mt-6 space-y-2">{people.slice(0, 4).map((person) => <div key={person.id} className="flex items-center gap-3 rounded-xl bg-white/5 p-3"><span className="flex-1 text-sm font-bold">{person.displayName}</span><button className="rounded-lg bg-rose-500 px-3 py-2 text-xs font-black">Share</button></div>)}</div></div></motion.section></div>; }
 
