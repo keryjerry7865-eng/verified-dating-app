@@ -9,7 +9,7 @@ import LivePartyRoom from './LivePartyRoom';
 
 type SocialDashboardProps = { session: Session; onSignOut: () => void };
 type SocialProfile = LocalProfile & { displayName: string; likes: number; views: number };
-type Tab = 'home' | 'party' | 'room' | 'chat' | 'mine';
+type Tab = 'home' | 'party' | 'room' | 'chat' | 'mine' | 'explore' | 'events' | 'moments' | 'matching' | 'profile';
 type RoomMode = 'live' | 'voice' | 'video';
 type Gift = { name: string; emoji: string; price: number };
 type ChatMessage = { id: string; senderId: string; senderName: string; body: string; createdAt: string };
@@ -40,7 +40,7 @@ export default function SocialDashboard({ session, onSignOut }: SocialDashboardP
   const [pendingRoomMode, setPendingRoomMode] = useState<RoomMode | null>(null);
   const [roomTheme, setRoomTheme] = useState(0);
   const [roomName, setRoomName] = useState('Midnight Voice Lounge');
-  const [roomId] = useState('LM-2486');
+  const [roomId, setRoomId] = useState('LM-2486');
   const [people, setPeople] = useState<SocialProfile[]>([]);
   const [profile, setProfile] = useState<SocialProfile | null>(null);
   const [wallet, setWallet] = useState<WalletState>(() => readWallet(session.user.id));
@@ -52,6 +52,7 @@ export default function SocialDashboard({ session, onSignOut }: SocialDashboardP
   const [inviteOpen, setInviteOpen] = useState(false);
   const [roomChat, setRoomChat] = useState<ChatMessage[]>([]);
   const [roomMessage, setRoomMessage] = useState('');
+  const [rooms, setRooms] = useState<Array<{ id: string; name: string; description: string; viewer_count: number; mode: string; theme: string; slug: string }>>([]);
   const [joinedSeats, setJoinedSeats] = useState<number[]>([1]);
   const [micLevels, setMicLevels] = useState<number[]>(Array(10).fill(0));
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
@@ -98,16 +99,64 @@ export default function SocialDashboard({ session, onSignOut }: SocialDashboardP
         const normalized = normalizeProfile(session.user.id, current as Record<string, unknown> | null) || local;
         if (normalized) setProfile({ ...normalized, displayName: getName(normalized, session), likes: 0, views: 0 });
         const { data: rows } = await supabase.from('profiles').select('*').neq('id', session.user.id).limit(12);
-        setPeople((rows || []).map((row) => normalizeProfile(String(row.id), row as Record<string, unknown>)).filter((item): item is LocalProfile => Boolean(item)).map((item) => {
+        const fetchedPeople = (rows || []).map((row) => normalizeProfile(String(row.id), row as Record<string, unknown>)).filter((item): item is LocalProfile => Boolean(item)).map((item) => {
           const metrics = readMetrics(session.user.id, item.id);
           return { ...item, displayName: getName(item, session), likes: metrics.likes, views: metrics.views };
-        }));
+        });
+        if (fetchedPeople.length) setPeople(fetchedPeople);
+        else if (local) setProfile({ ...local, displayName: getName(local, session), likes: 0, views: 0 });
       } catch {
         if (local) setProfile({ ...local, displayName: getName(local, session), likes: 0, views: 0 });
       }
     };
     void loadPeople();
   }, [session.user.id, session]);
+
+  useEffect(() => {
+    const loadRooms = async () => {
+      try {
+        const { data, error } = await supabase.from('voice_rooms').select('*').order('viewer_count', { ascending: false }).limit(6);
+        if (error || !data) return;
+        const mappedRooms = data.map((room) => ({
+          id: String(room.id),
+          name: String(room.name || 'Live room'),
+          description: String(room.description || ''),
+          viewer_count: Number(room.viewer_count || 0),
+          mode: String(room.mode || 'voice'),
+          theme: String(room.theme || roomThemes[0]),
+          slug: String(room.slug || 'live-room'),
+        }));
+        if (mappedRooms.length) {
+          setRooms(mappedRooms);
+          setRoomId(String(mappedRooms[0].id));
+          setRoomName(mappedRooms[0].name);
+          setRoomTheme(Math.min(roomThemes.length - 1, mappedRooms[0].theme.includes('cyan') ? 1 : mappedRooms[0].theme.includes('orange') ? 2 : 0));
+        }
+      } catch {
+        // Keep local demo rooms if Supabase is unavailable.
+      }
+    };
+    void loadRooms();
+  }, []);
+
+  useEffect(() => {
+    const loadRoomMessages = async () => {
+      try {
+        const { data, error } = await supabase.from('room_messages').select('*').eq('room_id', roomId).order('created_at', { ascending: true }).limit(25);
+        if (error || !data) return;
+        setRoomChat((data || []).map((message) => ({
+          id: String(message.id),
+          senderId: String(message.sender_id || 'guest'),
+          senderName: String(message.sender_name || 'Guest'),
+          body: String(message.body || ''),
+          createdAt: String(message.created_at || new Date().toISOString()),
+        })));
+      } catch {
+        // Ignore chat load errors and keep the demo room state.
+      }
+    };
+    void loadRoomMessages();
+  }, [roomId]);
 
   useEffect(() => {
     const channel = supabase.channel(`room-events:${session.user.id}`)
@@ -182,12 +231,30 @@ export default function SocialDashboard({ session, onSignOut }: SocialDashboardP
     if (videoRef.current && cameraStream && roomMode !== 'voice') videoRef.current.srcObject = cameraStream;
   }, [cameraStream, roomMode]);
 
-  const sendRoomMessage = (event: React.FormEvent) => {
+  const sendRoomMessage = async (event: React.FormEvent) => {
     event.preventDefault();
     const body = roomMessage.trim();
     if (!body) return;
-    setRoomChat((current) => [...current, { id: crypto.randomUUID(), senderId: session.user.id, senderName: profile?.displayName || 'You', body, createdAt: new Date().toISOString() }]);
+    const message = {
+      id: crypto.randomUUID(),
+      senderId: session.user.id,
+      senderName: profile?.displayName || 'You',
+      body,
+      createdAt: new Date().toISOString(),
+    };
+    setRoomChat((current) => [...current, message]);
     setRoomMessage('');
+
+    try {
+      await supabase.from('room_messages').insert({
+        room_id: roomId,
+        sender_id: session.user.id,
+        sender_name: message.senderName,
+        body: message.body,
+      });
+    } catch {
+      // Continue with local chat if the room table is unavailable.
+    }
   };
 
   const sendGift = (gift: Gift, target: SocialProfile | null = giftTarget) => {
@@ -219,11 +286,24 @@ export default function SocialDashboard({ session, onSignOut }: SocialDashboardP
     const saved = readSwipes(session.user.id);
     saved[person.id] = direction;
     writeSwipes(session.user.id, saved);
-    if (direction === 'right') {
-      const { data: reciprocal } = await supabase.from('likes').select('id').eq('liker_id', person.id).eq('liked_id', session.user.id).maybeSingle();
-      try { await supabase.from('likes').insert({ liker_id: session.user.id, liked_id: person.id, is_mutual: Boolean(reciprocal) }); } catch { /* local swipe state remains authoritative for the UI */ }
-      if (reciprocal) addAlert(`It’s a match with ${person.displayName}!`);
+
+    try {
+      if (direction === 'right') {
+        const { data: reciprocal } = await supabase.from('likes').select('id').eq('liker_id', person.id).eq('liked_id', session.user.id).maybeSingle();
+        await supabase.from('likes').insert({ liker_id: session.user.id, liked_id: person.id, is_mutual: Boolean(reciprocal) });
+        if (reciprocal) {
+          await supabase.from('matches').upsert({
+            user_a: session.user.id,
+            user_b: person.id,
+            created_at: new Date().toISOString(),
+          }, { onConflict: 'user_a,user_b' });
+          addAlert(`It’s a match with ${person.displayName}!`);
+        }
+      }
+    } catch {
+      // Local swipe state remains authoritative if the remote tables are not available yet.
     }
+
     setPeople((current) => current.filter((item) => item.id !== person.id));
   };
 
@@ -287,6 +367,19 @@ export default function SocialDashboard({ session, onSignOut }: SocialDashboardP
   const tabs = useMemo(() => [{ id: 'home' as const, label: 'Home', icon: Home }, { id: 'party' as const, label: 'Party', icon: Radio }, { id: 'chat' as const, label: 'Chat', icon: MessageCircle }, { id: 'mine' as const, label: 'Mine', icon: UserRound }], []);
   const currentCard = people[0];
 
+  const addMoment = (content: string, image?: string) => {
+    const entry = {
+      id: crypto.randomUUID(),
+      author: profile?.displayName || 'You',
+      content: content || 'A new moment from the room.',
+      image: image || profile?.avatarUrl || '',
+      createdAt: new Date().toISOString(),
+    };
+    setProfile((current) => current ? { ...current, bio: current.bio || entry.content } : current);
+    addAlert('Moment shared successfully.');
+    return entry;
+  };
+
   if (activeTab === 'room') {
     return (
       <main className="min-h-screen bg-[#110d1d] p-4 text-white">
@@ -328,10 +421,15 @@ export default function SocialDashboard({ session, onSignOut }: SocialDashboardP
   return (
     <main className="min-h-screen bg-[#110d1d] pb-24 text-white">
       <AnimatePresence>{alerts.map((alert, index) => <motion.div key={`${alert}-${index}`} initial={{ y: -80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -80 }} className="fixed inset-x-4 top-4 z-[100] mx-auto max-w-md rounded-2xl border border-white/10 bg-[#241c35]/95 px-4 py-3 text-sm font-bold shadow-2xl"><Bell className="mr-2 inline h-4 w-4 text-amber-300" />{alert}</motion.div>)}</AnimatePresence>
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#171125]/90 px-4 py-3 backdrop-blur-xl"><div className="mx-auto flex max-w-6xl items-center justify-between"><div className="flex items-center gap-2"><div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-rose-400 to-violet-600"><Heart className="h-5 w-5 fill-white" /></div><span className="font-black">LoveMatch</span></div><div className="flex items-center gap-2 text-xs font-black"><span className="rounded-full bg-violet-500/20 px-3 py-1.5 text-violet-200">💎 {wallet.coins}</span><span className="rounded-full bg-amber-400/20 px-3 py-1.5 text-amber-200">👑 {Math.floor(wallet.purchasedCoins / 10)}</span><button onClick={() => setRechargeOpen(true)} className="rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-3 py-1.5 text-black">Recharge</button>{profile?.avatarUrl ? <button onClick={() => profile && selectProfile(profile)}><img src={profile.avatarUrl} alt={profile.displayName} className="h-9 w-9 rounded-full object-cover ring-2 ring-rose-300" /></button> : <UserRound className="h-7 w-7 text-white/50" />}</div></div></header>
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#171125]/90 px-4 py-3 backdrop-blur-xl"><div className="mx-auto flex max-w-6xl items-center justify-between"><div className="flex items-center gap-2"><div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-rose-400 to-violet-600"><Heart className="h-5 w-5 fill-white" /></div><span className="font-black">LoveMatch</span></div><div className="flex items-center gap-2 text-xs font-black"><span className="rounded-full bg-violet-500/20 px-3 py-1.5 text-violet-200">💎 {wallet.coins}</span><span className="rounded-full bg-amber-400/20 px-3 py-1.5 text-amber-200">👑 {Math.floor(wallet.purchasedCoins / 10)}</span><button onClick={() => setRechargeOpen(true)} className="rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-3 py-1.5 text-black">Recharge</button>{profile?.avatarUrl ? <button type="button" onClick={() => setActiveTab('profile')}><img src={profile.avatarUrl} alt={profile.displayName} className="h-9 w-9 rounded-full object-cover ring-2 ring-rose-300" /></button> : <button type="button" onClick={() => setActiveTab('profile')} className="rounded-full bg-white/5 p-2"><UserRound className="h-6 w-6 text-white/60" /></button>}</div></div></header>
 
       <div className="mx-auto max-w-6xl px-4 py-6">
-        {activeTab === 'home' && <HomeView people={people} onRoom={() => { setActiveTab('party'); requestRoomMode('voice'); }} onProfile={selectProfile} onInvite={() => setInviteOpen(true)} />}
+        {activeTab === 'home' && <HomeView people={people} onRoom={() => { setActiveTab('party'); requestRoomMode('voice'); }} onProfile={selectProfile} onInvite={() => setInviteOpen(true)} onExplore={() => setActiveTab('explore')} onEvent={() => setActiveTab('events')} onMoments={() => setActiveTab('moments')} onMatch={() => setActiveTab('matching')} />}
+        {activeTab === 'explore' && <ExploreView people={people} onRoom={() => { setActiveTab('party'); requestRoomMode('voice'); }} onProfile={selectProfile} />}
+        {activeTab === 'events' && <EventView onOpenRoom={() => { setActiveTab('party'); requestRoomMode('voice'); }} />}
+        {activeTab === 'moments' && <MomentsView onShare={(message, image) => addMoment(message, image)} profile={profile} />}
+        {activeTab === 'matching' && <MatchingView people={people} onLike={(person) => { addAlert(`You liked ${person.displayName}.`); setPeople((current) => current.filter((item) => item.id !== person.id)); }} onPass={(person) => setPeople((current) => current.filter((item) => item.id !== person.id))} />}
+        {activeTab === 'profile' && <ProfileView profile={profile} onEdit={() => setActiveTab('mine')} onSignOut={onSignOut} />}
         {activeTab === 'party' && <PartyView roomName={roomName} setRoomName={setRoomName} roomId={roomId} theme={roomThemes[roomTheme]} roomMode={roomMode} viewerCount={viewerCount} cameraStream={cameraStream} videoRef={videoRef} mediaError={mediaError} joinedSeats={joinedSeats} micLevels={micLevels} onMode={requestRoomMode} onSeat={(seat) => setJoinedSeats((current) => current.includes(seat) ? current.filter((item) => item !== seat) : [...current, seat])} onTheme={() => setRoomTheme((roomTheme + 1) % roomThemes.length)} onInvite={() => setInviteOpen(true)} roomChat={roomChat} roomMessage={roomMessage} setRoomMessage={setRoomMessage} onSendMessage={sendRoomMessage} audioFile={audioFile} audioUrl={audioUrl} audioPlaying={audioPlaying} audioRef={audioRef} audioVolume={audioVolume} onVolume={setAudioVolume} onFile={handleAudioFile} onToggleAudio={() => void toggleAudio()} youtubeUrl={youtubeUrl} setYoutubeUrl={setYoutubeUrl} youtubeVideoId={youtubeVideoId} onResolveYoutube={resolveYoutubeQuery} youtubeSearchLoading={youtubeSearchLoading} youtubeSearchMessage={youtubeSearchMessage} onGift={(gift) => sendGift(gift)} onOpenProfile={(person) => { setGiftTarget(person); selectProfile(person); }} />}
         {activeTab === 'chat' && <ChatView people={people} onProfile={selectProfile} onGift={(gift, target) => sendGift(gift, target)} onRoom={() => { setActiveTab('party'); requestRoomMode('voice'); }} coins={wallet.coins} />}
         {activeTab === 'mine' && <MineView profile={profile} wallet={wallet} onRecharge={() => setRechargeOpen(true)} onProfile={() => profile && selectProfile(profile)} onSignOut={onSignOut} />}
@@ -354,6 +452,53 @@ function PartyView(props: { roomName: string; setRoomName: (value: string) => vo
 function MediaHub(props: any) { return <section className="grid gap-4 lg:grid-cols-2"><div className="rounded-3xl bg-white/5 p-4 ring-1 ring-white/10"><div className="flex items-center justify-between"><div><p className="text-xs font-black uppercase tracking-widest text-rose-300">Room music</p><h2 className="mt-1 font-black">Local audio player</h2></div><Music2 className="text-rose-300" /></div><input type="file" accept="audio/mpeg,audio/mp3,audio/*" onChange={(event) => props.onFile(event.target.files?.[0])} className="mt-4 block w-full text-xs text-white/55 file:mr-3 file:rounded-lg file:border-0 file:bg-rose-500 file:px-3 file:py-2 file:text-xs file:font-bold file:text-white" />{props.audioUrl && <><audio ref={props.audioRef} src={props.audioUrl} loop onEnded={() => undefined} /><div className="mt-3 flex items-center gap-3"><button onClick={props.onToggleAudio} className="rounded-full bg-rose-500 p-3">{props.audioPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}</button><span className="min-w-0 flex-1 truncate text-xs font-bold">{props.audioFile?.name}</span><Volume2 className="h-4 w-4 text-white/50" /><input type="range" min="0" max="1" step=".05" value={props.audioVolume} onChange={(event) => { props.onVolume(Number(event.target.value)); if (props.audioRef.current) props.audioRef.current.volume = Number(event.target.value); }} className="w-20 accent-rose-500" /></div></>}</div><div className="rounded-3xl bg-white/5 p-4 ring-1 ring-white/10"><div className="flex items-center justify-between"><div><p className="text-xs font-black uppercase tracking-widest text-red-300">Video party</p><h2 className="mt-1 font-black">YouTube search</h2></div><Youtube className="text-red-400" /></div><div className="mt-4 flex gap-2"><input value={props.youtubeUrl} onChange={(event) => props.setYoutubeUrl(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void props.onResolveYoutube(); }} placeholder="Search songs or paste a YouTube URL" className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-xs outline-none" /><button onClick={() => void props.onResolveYoutube()} disabled={props.youtubeSearchLoading} className="flex items-center gap-1 rounded-xl bg-red-500 px-3 text-xs font-black"><Search className="h-3.5 w-3.5" />{props.youtubeSearchLoading ? '...' : 'Search'}</button></div>{props.youtubeSearchMessage && <p className="mt-2 text-[11px] text-white/55">{props.youtubeSearchMessage}</p>}</div></section>; }
 
 function RoomChat({ messages, message, setMessage, onSend }: { messages: ChatMessage[]; message: string; setMessage: (value: string) => void; onSend: (event: React.FormEvent) => void }) { return <div className="rounded-3xl bg-white/5 p-4 ring-1 ring-white/10"><div className="flex items-center justify-between"><h2 className="font-black">Room chat</h2><MessageCircle className="h-4 w-4 text-rose-300" /></div><div className="mt-3 h-40 space-y-2 overflow-y-auto rounded-2xl bg-black/15 p-3">{messages.length ? messages.map((item) => <p key={item.id} className="text-xs"><strong className="text-rose-300">{item.senderName}: </strong><span className="text-white/75">{item.body}</span></p>) : <p className="text-xs text-white/40">Be the first to say hello.</p>}</div><form onSubmit={onSend} className="mt-3 flex gap-2"><input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Write a comment..." className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-xs outline-none" /><button className="rounded-xl bg-rose-500 px-3"><Send className="h-4 w-4" /></button></form></div>; }
+
+function ExploreView({ people, onRoom, onProfile }: { people: SocialProfile[]; onRoom: () => void; onProfile: (person: SocialProfile) => void }) { return <section className="space-y-5"><div className="rounded-3xl bg-gradient-to-br from-violet-900 via-fuchsia-700 to-rose-600 p-6"><p className="text-[10px] font-black uppercase tracking-[0.25em] text-pink-100">Explore</p><h1 className="mt-2 text-3xl font-black">Trending rooms and communities</h1><p className="mt-2 text-sm text-white/75">Discover the newest spaces for live conversation, music, and real-time connection.</p><button onClick={onRoom} className="mt-5 rounded-full bg-white px-4 py-2 text-xs font-black text-[#160f22]">Join a live room</button></div><div className="grid gap-4 md:grid-cols-2">{[...people.slice(0, 6), ...people.slice(0, 2)].map((person, index) => <button key={`${person.id}-${index}`} onClick={() => onProfile(person)} className="rounded-3xl bg-white/5 p-4 text-left ring-1 ring-white/10"><div className="flex items-center justify-between"><span className="text-xs font-black uppercase tracking-[0.2em] text-rose-300">Room {index + 1}</span><span className="rounded-full bg-emerald-500/20 px-2 py-1 text-[10px] font-black text-emerald-200">Live</span></div><h2 className="mt-3 text-xl font-black">{person.displayName}</h2><p className="mt-2 text-sm text-white/60">{person.city || 'In the city'} · {Math.max(12, person.views + 20)} listeners</p></button>)}</div></section>; }
+
+function EventView({ onOpenRoom }: { onOpenRoom: () => void }) { const events = [{ title: 'Sunset Speed Dating', time: 'Tonight · 8:30 PM', tag: 'Hot' }, { title: 'K-drama Lounge', time: 'Sat · 7:00 PM', tag: 'Popular' }, { title: 'Coffee & Connection', time: 'Sun · 10:00 AM', tag: 'New' }]; return <section className="space-y-5"><div className="rounded-3xl bg-white/5 p-5 ring-1 ring-white/10"><p className="text-[10px] font-black uppercase tracking-[0.25em] text-rose-300">Events</p><h1 className="mt-2 text-3xl font-black">This week</h1></div>{events.map((event) => <div key={event.title} className="rounded-3xl bg-white/5 p-5 ring-1 ring-white/10"><div className="flex items-center justify-between"><div><p className="text-xs font-black uppercase tracking-[0.2em] text-amber-200">{event.tag}</p><h2 className="mt-2 text-xl font-black">{event.title}</h2><p className="mt-2 text-sm text-white/55">{event.time}</p></div><button onClick={onOpenRoom} className="rounded-full bg-rose-500 px-4 py-2 text-xs font-black">Join</button></div></div>)}</section>; }
+
+function MomentsView({ onShare, profile }: { onShare: (message: string, image?: string) => void; profile: SocialProfile | null }) {
+  const [text, setText] = useState('');
+  const [image, setImage] = useState('');
+  const [items, setItems] = useState<Array<{ id: string; author: string; content: string; image?: string }>>([]);
+
+  useEffect(() => {
+    const loadMoments = async () => {
+      try {
+        const { data, error } = await supabase.from('moments').select('*').order('created_at', { ascending: false }).limit(8);
+        if (error || !data) return;
+        setItems(data.map((item) => ({
+          id: String(item.id),
+          author: String(item.author_name || 'Anonymous'),
+          content: String(item.content || 'Shared a moment.'),
+          image: item.image_url ? String(item.image_url) : undefined,
+        })));
+      } catch {
+        setItems(profile ? [{ id: 'mine', author: profile.displayName, content: profile.bio || 'Just joined LoveMatch and ready to meet someone amazing.', image: profile.avatarUrl }] : []);
+      }
+    };
+    void loadMoments();
+  }, [profile]);
+
+  const handleShare = async () => {
+    if (!text.trim() && !image.trim()) return;
+    const payload = { user_id: profile?.id || session.user.id, author_name: profile?.displayName || 'You', content: text.trim() || 'Shared a moment.', image_url: image.trim() || null };
+    try {
+      await supabase.from('moments').insert(payload);
+    } catch {
+      // Fallback: UI still works without remote storage.
+    }
+    onShare(text, image);
+    setItems((current) => [{ id: crypto.randomUUID(), author: profile?.displayName || 'You', content: text.trim() || 'Shared a moment.', image: image.trim() || profile?.avatarUrl }, ...current]);
+    setText('');
+    setImage('');
+  };
+
+  return <section className="space-y-5"><div className="rounded-3xl bg-white/5 p-5 ring-1 ring-white/10"><p className="text-[10px] font-black uppercase tracking-[0.25em] text-rose-300">Moments</p><h1 className="mt-2 text-3xl font-black">Share a moment</h1></div><div className="rounded-3xl bg-white/5 p-5 ring-1 ring-white/10"><textarea value={text} onChange={(event) => setText(event.target.value)} rows={4} placeholder="Share a photo, update, or story..." className="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-sm text-white outline-none" /><div className="mt-3 flex items-center gap-2"><input value={image} onChange={(event) => setImage(event.target.value)} placeholder="Paste image URL (optional)" className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs outline-none" /><button onClick={handleShare} className="rounded-xl bg-rose-500 px-4 py-2 text-xs font-black">Post</button></div></div><div className="rounded-3xl bg-white/5 p-5 ring-1 ring-white/10"><h2 className="text-xl font-black">Recent moments</h2><div className="mt-4 space-y-3">{items.length ? items.map((moment) => <div key={moment.id} className="rounded-2xl bg-black/20 p-3"><p className="text-sm font-black">{moment.author}</p><p className="mt-2 text-sm text-white/70">{moment.content}</p>{moment.image && <img src={moment.image} alt={moment.author} className="mt-3 h-40 w-full rounded-2xl object-cover" />}</div>) : <div className="rounded-2xl bg-black/20 p-3 text-sm text-white/60">No moments yet — be the first to share one.</div>}</div></div></section>; }
+
+function MatchingView({ people, onLike, onPass }: { people: SocialProfile[]; onLike: (person: SocialProfile) => void; onPass: (person: SocialProfile) => void }) { const [card, setCard] = useState<SocialProfile | null>(people[0] || null); return <section className="space-y-5"><div className="rounded-3xl bg-white/5 p-5 ring-1 ring-white/10"><p className="text-[10px] font-black uppercase tracking-[0.25em] text-rose-300">Matching</p><h1 className="mt-2 text-3xl font-black">People you may like</h1></div>{card ? <div className="rounded-[2rem] bg-gradient-to-br from-rose-500/20 via-violet-900 to-[#170f25] p-5 ring-1 ring-white/10"><div className="flex h-72 items-end rounded-[1.5rem] bg-gradient-to-br from-violet-800 via-rose-500 to-orange-500 p-4" style={{ backgroundImage: card.avatarUrl ? `linear-gradient(135deg, rgba(0,0,0,0.1), rgba(0,0,0,0.45)), url(${card.avatarUrl})` : undefined, backgroundSize: 'cover' }}><div className="w-full rounded-2xl bg-black/30 p-4 backdrop-blur-sm"><h2 className="text-2xl font-black">{card.displayName}</h2><p className="mt-1 text-sm text-white/70">{card.city || 'Near you'} · {card.age || 25}</p></div></div><div className="mt-5 flex gap-3"><button onClick={() => { onPass(card); setCard(people.find((item) => item.id !== card.id) || null); }} className="flex-1 rounded-2xl border border-white/15 bg-black/20 py-3 text-sm font-black">Pass</button><button onClick={() => { onLike(card); setCard(people.find((item) => item.id !== card.id) || null); }} className="flex-1 rounded-2xl bg-rose-500 py-3 text-sm font-black">Like</button></div></div> : <div className="rounded-3xl bg-white/5 p-6 text-center text-white/60 ring-1 ring-white/10">You’ve reviewed everyone for now. Try coming back later.</div>}</section>; }
+
+function ProfileView({ profile, onEdit, onSignOut }: { profile: SocialProfile | null; onEdit: () => void; onSignOut: () => void }) { return <section className="space-y-5"><div className="rounded-[2rem] bg-gradient-to-br from-violet-900 via-fuchsia-700 to-rose-600 p-6"><div className="flex items-center gap-4"><div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-3xl bg-white/15">{profile?.avatarUrl ? <img src={profile.avatarUrl} alt={profile.displayName} className="h-full w-full object-cover" /> : <UserRound className="h-8 w-8" />}</div><div><h1 className="text-2xl font-black">{profile?.displayName || 'Your profile'}</h1><p className="mt-1 text-sm text-white/70">{profile?.city || 'City not set'} · {profile?.age || 'Age not set'}</p></div></div></div><div className="grid gap-3 md:grid-cols-3">{[['Likes', profile?.likes ?? 0], ['Views', profile?.views ?? 0], ['Matches', 12]].map(([label, value]) => <div key={String(label)} className="rounded-3xl bg-white/5 p-4 ring-1 ring-white/10"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-rose-300">{String(label)}</p><p className="mt-2 text-3xl font-black">{String(value)}</p></div>)}</div><div className="rounded-3xl bg-white/5 p-5 ring-1 ring-white/10"><p className="text-[10px] font-black uppercase tracking-[0.25em] text-rose-300">Bio</p><p className="mt-2 text-sm text-white/70">{profile?.bio || 'Tell people a little more about yourself and your interests.'}</p><div className="mt-4 flex gap-2">{(profile?.interests || ['Travel', 'Music']).slice(0, 4).map((item) => <span key={item} className="rounded-full bg-white/10 px-3 py-1.5 text-[10px] font-black text-white/75">{item}</span>)}</div></div><div className="flex gap-3"><button onClick={onEdit} className="flex-1 rounded-2xl bg-white/10 py-3 text-sm font-black">Edit profile</button><button onClick={onSignOut} className="flex-1 rounded-2xl bg-rose-500 py-3 text-sm font-black">Sign out</button></div></section>; }
 
 function GiftPanel({ gifts: options, onGift, onOpenProfile }: { gifts: Gift[]; onGift: (gift: Gift) => void; onOpenProfile: (person: SocialProfile) => void }) { return <div className="rounded-3xl bg-amber-300/10 p-4 ring-1 ring-amber-200/10"><div className="flex items-center justify-between"><h2 className="flex items-center gap-2 font-black"><Gift className="h-4 w-4 text-amber-300" />Animated gifts</h2><span className="text-xs text-amber-200">Car · Crown · Bike · Rose</span></div><div className="mt-4 grid grid-cols-4 gap-2">{options.map((gift) => <button key={gift.name} onClick={() => onGift(gift)} className="rounded-2xl bg-white/10 p-3 text-center transition hover:-translate-y-1 hover:bg-rose-500/20"><div className="text-3xl">{gift.emoji}</div><p className="mt-1 text-[10px] font-black">{gift.name}</p><p className="text-[10px] text-amber-200">{gift.price} 💎</p></button>)}</div><button onClick={() => onOpenProfile({ id: 'room-host', age: null, gender: '', city: 'Live room', bio: '', interests: [], avatarUrl: '', latitude: null, longitude: null, matchDistance: 25, displayName: 'Room host', likes: 18, views: 247 })} className="mt-3 text-xs font-bold text-amber-200">Open room host profile</button></div>; }
 
