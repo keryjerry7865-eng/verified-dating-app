@@ -44,8 +44,6 @@ export default function App() {
   const [incomeWallet, setIncomeWallet] = useState(420);
   const [upiId, setUpiId] = useState('');
   const [vipStatus, setVipStatus] = useState<string | null>(null);
-  
-  // Real-time Trackers
   const [whoViewedCount] = useState(38);
   const [whoLikedCount] = useState(22);
   const [systemAlerts, setSystemAlerts] = useState<string[]>([
