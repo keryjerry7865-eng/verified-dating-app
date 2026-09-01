@@ -114,13 +114,14 @@ export default function LivePartyRoom({ roomDetails, currentUser }: LivePartyRoo
           <div className="w-full h-full flex flex-col items-center justify-center gap-3">
             {activeYoutubeTrack ? (
               <div className="w-full aspect-video rounded-xl overflow-hidden shadow-inner">
-                <ReactPlayer 
-                  url={activeYoutubeTrack} 
-                  playing={isPlaying} 
-                  controls={isHostOrAdmin} 
-                  width="100%" 
-                  height="100%" 
-                />
+                {React.createElement(ReactPlayer as any, {
+                  url: activeYoutubeTrack,
+                  playing: isPlaying,
+                  controls: isHostOrAdmin,
+                  width: '100%',
+                  height: '100%',
+                  onError: () => console.error('Failed to load video')
+                })}
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center p-6 text-center">
