@@ -94,6 +94,16 @@ export default function SocialDashboard({ session, onSignOut }: SocialDashboardP
     setAlerts((current) => [...current, message]);
     window.setTimeout(() => setAlerts((current) => current.filter((item) => item !== message)), 4500);
   };
+  const isRoomOwner = profile?.id === session.user.id;
+  const handleMuteParticipant = (seat: number) => {
+    setMicLevels((current) => current.map((level, index) => (index === seat - 1 ? 0 : level)));
+    addAlert(`Seat ${seat} muted by the room owner.`);
+  };
+  const handleKickParticipant = (seat: number) => {
+    setJoinedSeats((current) => current.filter((item) => item !== seat));
+    setMicLevels((current) => current.map((level, index) => (index === seat - 1 ? 0 : level)));
+    addAlert(`Seat ${seat} was kicked out of the room.`);
+  };
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -479,6 +489,9 @@ export default function SocialDashboard({ session, onSignOut }: SocialDashboardP
           onTheme={() => setRoomTheme((roomTheme + 1) % roomThemes.length)}
           onInvite={() => setInviteOpen(true)}
           onGift={(gift) => sendGift(gift)}
+          isRoomOwner={isRoomOwner}
+          onMuteParticipant={handleMuteParticipant}
+          onKickParticipant={handleKickParticipant}
         />
         <GiftOverlay gift={activeGift} onClose={() => setActiveGift(null)} />
         <InviteBottomSheet open={inviteOpen} onClose={() => setInviteOpen(false)} people={people} />
