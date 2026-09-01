@@ -1,118 +1,256 @@
-import { useEffect, useRef, useState } from 'react';
-import { ChevronLeft, Gift, Mic, Radio, Search, Send, Share2, X, Youtube } from 'lucide-react';
-import { motion } from 'framer-motion';
+import React, { useState, useEffect, useRef } from 'react';
+import ReactPlayer from 'react-player';
 
-type Mode = 'voice' | 'video' | 'live';
-type Gift = { name: string; emoji: string; price: number };
-type Message = { id: string; sender: string; body: string };
+interface LivePartyRoomProps {
+  roomDetails: {
+    id: string;
+    title: string;
+    creator_id: string;
+    type: 'video' | 'audio';
+  };
+  currentUser: {
+    id: string;
+    name: string;
+    role: 'host' | 'admin' | 'user';
+  };
+}
 
-export interface LivePartyRoomProps {
-  roomName: string;
-  roomId: string;
-  theme: string;
-  mode: Mode;
-  viewerCount: number;
-  stream: MediaStream | null;
-  videoRef: React.RefObject<HTMLVideoElement>;
-  mediaError: string;
-  seats: number[];
-  levels: number[];
-  messages: Message[];
-  message: string;
-  onMessageChange: (value: string) => void;
-  onSendMessage: (event: React.FormEvent) => void;
-  onModeRequest: (mode: Mode) => void;
-  onBack: () => void;
-  onSeat: (seat: number) => void;
-  onTheme: () => void;
-  onInvite: () => void;
-  onGift: (gift: Gift) => void;
-  youtubeQuery: string;
-  youtubeVideoId: string;
-  onYoutubeQueryChange: (value: string) => void;
-  onResolveYoutube: () => void;
-  youtubeSearchLoading: boolean;
-  youtubeSearchMessage: string;
-  isRoomOwner?: boolean;
-  onMuteParticipant?: (seat: number) => void;
-  onKickParticipant?: (seat: number) => void;
-};
+interface Participant {
+  id: string;
+  name: string;
+  isMuted: boolean;
+  isOnMic: boolean;
+}
 
-const gifts: Gift[] = [
-  { name: 'Rose', emoji: '🌹', price: 10 },
-  { name: 'Crown', emoji: '👑', price: 150 },
-  { name: 'Bike', emoji: '🏍️', price: 100 },
-  { name: 'Car', emoji: '🚗', price: 250 },
-];
+export default function LivePartyRoom({ roomDetails, currentUser }: LivePartyRoomProps) {
+  const isHostOrAdmin = currentUser.role === 'host' || currentUser.role === 'admin';
+  const isVideoRoom = roomDetails.type === 'video';
 
-export default function LivePartyRoom(props: LivePartyRoomProps) {
-  const [warningOpen, setWarningOpen] = useState<Mode | null>(null);
-  const [videoMode, setVideoMode] = useState(false);
-  const [mediaUrl, setMediaUrl] = useState('');
-  const [mediaLabel, setMediaLabel] = useState('');
-  const isRoomOwner = props.isRoomOwner ?? true;
+  const [participants, setParticipants] = useState<Participant[]>([
+    { id: '1', name: 'Iris', isMuted: false, isOnMic: false },
+    { id: '2', name: 'Kritika Sharma', isMuted: false, isOnMic: true },
+  ]);
 
-  useEffect(() => {
-    setVideoMode(props.mode !== 'voice');
-  }, [props.mode]);
+  const [youtubeUrl, setYoutubeUrl] = useState<string>('');
+  const [activeYoutubeTrack, setActiveYoutubeTrack] = useState<string>('');
+  const [localAudioUrl, setLocalAudioUrl] = useState<string>('');
+  const [isPlaying, setIsPlaying] = useState<boolean>(true);
 
-  const resolveMediaSource = (source: string) => {
-    try {
-      const url = new URL(source);
-      if (url.hostname.includes('youtu.be')) return { type: 'youtube', id: url.pathname.slice(1) };
-      if (url.hostname.includes('youtube.com')) return { type: 'youtube', id: url.searchParams.get('v') || url.pathname.split('/').pop() || '' };
-    } catch {
-      // Keep direct media playback for local or remote video/audio sources.
+  const [comments, setComments] = useState<string[]>([
+    'Welcome to the live stream.',
+    'Iris joined the room.'
+  ]);
+  const [newComment, setNewComment] = useState<string>('');
+
+  const toggleParticipantMic = (participantId: string) => {
+    setParticipants(prev => prev.map(p => {
+      if (p.id === participantId) {
+        if (!p.isOnMic && participants.filter(user => user.isOnMic).length >= 10) {
+          alert('Maximum limit of 10 active microphones reached!');
+          return p;
+        }
+        return { ...p, isOnMic: !p.isOnMic };
+      }
+      return p;
+    }));
+  };
+
+  const handleMuteUser = (participantId: string) => {
+    if (!isHostOrAdmin) return;
+    setParticipants(prev => prev.map(p => 
+      p.id === participantId ? { ...p, isMuted: !p.isMuted } : p
+    ));
+  };
+
+  const handleKickUser = (participantId: string) => {
+    if (!isHostOrAdmin) return;
+    if (confirm('Are you sure you want to kick this user from the room?')) {
+      setParticipants(prev => prev.filter(p => p.id !== participantId));
     }
-    return { type: 'direct', id: source };
   };
 
-  const mediaSource = resolveMediaSource(mediaUrl);
-  const handleLocalMedia = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const nextUrl = URL.createObjectURL(file);
-    setMediaUrl(nextUrl);
-    setMediaLabel(file.name);
+  const handlePlayYoutube = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (youtubeUrl.trim()) {
+      setActiveYoutubeTrack(youtubeUrl);
+      setLocalAudioUrl('');
+    }
   };
 
-  const requestMode = (mode: Mode) => setWarningOpen(mode);
-  const confirmMode = () => {
-    if (!warningOpen) return;
-    props.onModeRequest(warningOpen);
-    setWarningOpen(null);
+  const handleLocalAudioChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const blobUrl = URL.createObjectURL(file);
+      setLocalAudioUrl(blobUrl);
+      setActiveYoutubeTrack('');
+    }
+  };
+
+  const handleSendComment = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newComment.trim()) {
+      setComments(prev => [...prev, `${currentUser.name}: ${newComment}`]);
+      setNewComment('');
+    }
   };
 
   return (
-    <section className="space-y-4">
-      <div className={`relative overflow-hidden rounded-[2rem] bg-gradient-to-br ${props.theme} p-3 shadow-2xl`}>
-        <div className="flex items-center justify-between">
-          <button type="button" onClick={props.onBack} aria-label="Back to dashboard" className="flex items-center gap-1 rounded-xl bg-black/25 px-2 py-2 text-xs font-black"><ChevronLeft className="h-4 w-4" />Back</button>
-          <div className="text-center"><p className="text-[10px] font-black uppercase tracking-widest text-white/60">{props.mode} room</p><h1 className="font-black">{props.roomName}</h1><p className="text-[10px] text-white/60">ID {props.roomId}</p></div>
-          <div className="flex gap-1"><button type="button" onClick={props.onInvite} aria-label="Share room" className="rounded-full bg-black/25 p-2"><Share2 className="h-4 w-4" /></button><button type="button" onClick={props.onTheme} aria-label="Change room theme" className="rounded-full bg-black/25 p-2"><Radio className="h-4 w-4" /></button></div>
-        </div>
-        <div className="mt-3 flex gap-1 overflow-x-auto">{(['voice', 'video', 'live'] as Mode[]).map((mode) => <button type="button" key={mode} onClick={() => requestMode(mode)} className={`whitespace-nowrap rounded-lg px-2 py-1.5 text-[10px] font-black ${props.mode === mode ? 'bg-white text-gray-900' : 'bg-black/20 text-white/70'}`}>{mode === 'voice' ? 'Voice Party' : mode === 'video' ? 'Video Party' : 'Video Live Stream'}</button>)}</div>
-        <div className="relative mt-3 aspect-video overflow-hidden rounded-2xl bg-black/45">{mediaUrl ? (mediaSource.type === 'youtube' && mediaSource.id ? <iframe title="Room media source" src={`https://www.youtube.com/embed/${mediaSource.id}?autoplay=1&enablejsapi=1`} allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen className="h-full w-full" /> : <video controls autoPlay playsInline className="h-full w-full object-cover" src={mediaUrl} />) : props.youtubeVideoId ? <iframe title="YouTube room stream" src={`https://www.youtube.com/embed/${props.youtubeVideoId}?autoplay=1&enablejsapi=1`} allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen className="h-full w-full" /> : videoMode && props.stream ? <video ref={props.videoRef} autoPlay muted playsInline className="h-full w-full object-cover" /> : <div className="flex h-full flex-col items-center justify-center gap-2 text-white/45">{props.mode === 'voice' && <Mic className="h-8 w-8" />}<span className="text-xs">Voice room · microphone active</span></div>}
-          <div className="absolute inset-x-0 bottom-0 flex max-h-[58%] flex-col justify-end bg-gradient-to-t from-black/75 via-black/25 to-transparent p-2 pt-12">
-            <div className="mb-2 flex items-center justify-between text-[10px] font-black"><span>👀 {props.viewerCount.toLocaleString()} watching</span><span className="text-white/60">Live chat</span></div>
-            <div className="max-h-24 space-y-1 overflow-y-auto pr-1">{props.messages.slice(-5).map((item) => <p key={item.id} className="text-xs leading-4 drop-shadow"><strong className="text-rose-200">{item.sender}: </strong><span className="text-white/85">{item.body}</span></p>)}</div>
-            <form onSubmit={props.onSendMessage} className="mt-2 flex gap-1.5"><input value={props.message} onChange={(event) => props.onMessageChange(event.target.value)} placeholder="Say something..." className="min-w-0 flex-1 rounded-lg border border-white/15 bg-black/30 px-2.5 py-2 text-xs text-white outline-none placeholder:text-white/45" /><button type="submit" aria-label="Send chat message" className="rounded-lg bg-rose-500 p-2"><Send className="h-3.5 w-3.5" /></button></form>
-          </div>
-        </div>
-        <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3"><div className="mb-2 flex items-center gap-2 text-xs font-black"><Youtube className="h-4 w-4 text-red-400" />YouTube theater stream</div><div className="flex gap-2"><input value={props.youtubeQuery} onChange={(event) => props.onYoutubeQueryChange(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') props.onResolveYoutube(); }} placeholder="Search a song or paste a YouTube URL" className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-xs outline-none" /><button type="button" onClick={props.onResolveYoutube} disabled={props.youtubeSearchLoading} className="flex items-center gap-1 rounded-xl bg-red-500 px-3 text-xs font-black"><Search className="h-3.5 w-3.5" />{props.youtubeSearchLoading ? '...' : 'Search'}</button></div>{props.youtubeSearchMessage && <p className="mt-2 text-[11px] text-white/55">{props.youtubeSearchMessage}</p>}{props.youtubeVideoId && <a href={`https://www.youtube.com/watch?v=${props.youtubeVideoId}`} target="_blank" rel="noreferrer" className="mt-2 inline-block rounded-lg bg-white px-3 py-2 text-xs font-black text-gray-900">Open in YouTube</a>}</div>
-        {isRoomOwner && <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3"><div className="mb-2 flex items-center justify-between gap-2 text-xs font-black"><span className="flex items-center gap-2"><Youtube className="h-4 w-4 text-red-400" />Room media source</span>{mediaUrl && <button type="button" onClick={() => { setMediaUrl(''); setMediaLabel(''); }} className="rounded-lg bg-white/10 px-2 py-1 text-[10px] font-black text-white/70">Clear</button>}</div><div className="space-y-2"><input value={mediaUrl} onChange={(event) => setMediaUrl(event.target.value)} placeholder="Paste a YouTube or media URL" className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-xs outline-none" /><div className="flex gap-2"><label className="flex-1 cursor-pointer rounded-xl border border-dashed border-white/15 bg-black/20 px-3 py-2.5 text-center text-[10px] font-black text-white/70"><span>{mediaLabel || 'Choose local media'}</span><input type="file" accept="video/*,audio/*" onChange={handleLocalMedia} className="hidden" /></label><button type="button" onClick={() => { if (!mediaUrl.trim()) return; setMediaUrl(mediaUrl.trim()); }} className="rounded-xl bg-rose-500 px-3 text-xs font-black">Use URL</button></div></div></div>}
-        {props.mediaError && <p className="mt-2 text-xs text-amber-200">{props.mediaError}</p>}
-     {props.mediaError && <p className="mt-2 text-xs text-amber-200">{props.mediaError}</p>}
+    <div className="w-full max-w-md mx-auto bg-gradient-to-b from-purple-900 to-indigo-950 text-white min-h-screen flex flex-col p-4 font-sans rounded-3xl shadow-2xl relative overflow-hidden">
       
-      {props.mode === "voice" ? (
-        <div className="mt-4 flex flex-col items-center justify-center">
-          {/* यह आपका ऑडियो रूम के लिए माइक है */}
-          <span className="text-4xl">🎙️</span>
-          <p className="text-sm mt-2 text-white/70">Audio Live Room</p>
+      <div className="flex justify-between items-center mb-4 border-b border-white/10 pb-2">
+        <div>
+          <h2 className="text-xl font-bold capitalize">{roomDetails.title}</h2>
+          <p className="text-xs text-purple-300 font-semibold">{isVideoRoom ? '🎥 Video Live Room' : '🎙️ Audio Live Room'}</p>
         </div>
-      ) : (
-        <div className="mt-4 w-full h-[250px] bg-black/20 rounded-xl flex items-center justify-center">
-          {/* यह वीडियो रूम के लिए खाली व्यू है जहाँ वीडियो दिखेगा */}
-          <span className="text-white/60 text-sm">Video Stream View</span>
+        <div className="flex items-center gap-2">
+          <button className="bg-white/10 p-2 rounded-full hover:bg-white/20">🔗</button>
+          <button className="bg-red-500/20 text-red-400 p-2 rounded-full hover:bg-red-500/40 text-xs font-bold px-3">Leave</button>
+        </div>
+      </div>
+
+      <div className="w-full bg-black/40 rounded-2xl p-4 mb-4 flex flex-col items-center justify-center min-h-[260px] relative border border-white/5">
+        
+        {isVideoRoom ? (
+          <div className="w-full h-full flex flex-col items-center justify-center gap-3">
+            {activeYoutubeTrack ? (
+              <div className="w-full aspect-video rounded-xl overflow-hidden shadow-inner">
+                <ReactPlayer 
+                  url={activeYoutubeTrack} 
+                  playing={isPlaying} 
+                  controls={isHostOrAdmin} 
+                  width="100%" 
+                  height="100%" 
+                />
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center p-6 text-center">
+                <div className="w-16 h-16 bg-purple-500/20 rounded-full flex items-center justify-center text-2xl mb-2 animate-pulse">📹</div>
+                <p className="text-sm font-medium">Direct Host Video Stream</p>
+                <p className="text-xs text-white/40 mt-1">Live camera active or stream video via URL below</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="w-full flex flex-col items-center">
+            {localAudioUrl && (
+              <div className="hidden">
+                <audio src={localAudioUrl} autoPlay controls={isHostOrAdmin} />
+              </div>
+            )}
+            
+            <p className="text-xs text-white/50 mb-3 bg-white/5 px-3 py-1 rounded-full">
+              Active Mics: {participants.filter(p => p.isOnMic).length} / 10
+            </p>
+
+            <div className="grid grid-cols-5 gap-3 w-full justify-items-center mb-2">
+              {Array.from({ length: 10 }).map((_, index) => {
+                const speaker = participants.filter(p => p.isOnMic)[index];
+                return (
+                  <div key={index} className="flex flex-col items-center relative">
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center border-2 ${speaker ? 'border-green-400 bg-purple-600' : 'border-dashed border-white/20 bg-white/5'}`}>
+                      {speaker ? speaker.name.charAt(0) : index + 1}
+                    </div>
+                    {speaker?.isMuted && (
+                      <span className="absolute -top-1 -right-1 bg-red-500 text-[10px] px-1 rounded-full">🔇</span>
+                    )}
+                    <span className="text-[10px] mt-1 truncate max-w-[50px] opacity-75">
+                      {speaker ? speaker.name : 'Empty'}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {isHostOrAdmin && (
+        <div className="w-full bg-white/5 border border-white/10 rounded-2xl p-3 mb-4 text-xs">
+          <p className="font-bold text-purple-300 mb-2">⚙️ Host Control Settings Panel</p>
+          
+          {isVideoRoom ? (
+            <form onSubmit={handlePlayYoutube} className="flex gap-2">
+              <input 
+                type="text" 
+                placeholder="Paste YouTube Video URL here..." 
+                value={youtubeUrl}
+                onChange={(e) => setYoutubeUrl(e.target.value)}
+                className="bg-black/40 border border-white/10 rounded-lg p-2 flex-1 text-white placeholder-white/30 outline-none"
+              />
+              <button type="submit" className="bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded-lg font-bold">Play</button>
+            </form>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <label className="block text-white/60 mb-1">Play song from Local Storage:</label>
+              <input 
+                type="file" 
+                accept="audio/*" 
+                onChange={handleLocalAudioChange}
+                className="block w-full text-xs text-white/50 file:mr-4 file:py-1 file:px-3 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-purple-600 file:text-white hover:file:bg-purple-700 cursor-pointer"
+              />
+              {localAudioUrl && <p className="text-[10px] text-green-400">🎵 Local audio track loaded into background stream.</p>}
+            </div>
+          )}
         </div>
       )}
+
+      <div className="flex-1 bg-black/20 rounded-2xl p-3 mb-4 overflow-y-auto flex flex-col justify-end min-h-[140px] max-h-[180px] border border-white/5">
+        <div className="space-y-1 overflow-y-auto pr-1">
+          {comments.map((comment, i) => (
+            <p key={i} className="text-xs leading-relaxed bg-white/5 p-1.5 rounded-lg border border-white/5"><span className="text-purple-300 font-medium">💬</span> {comment}</p>
+          ))}
+        </div>
+      </div>
+
+      <form onSubmit={handleSendComment} className="flex gap-2 mb-4">
+        <input 
+          type="text" 
+          placeholder="Say something..." 
+          value={newComment}
+          onChange={(e) => setNewComment(e.target.value)}
+          className="bg-white/10 rounded-xl p-3 flex-1 text-xs text-white placeholder-white/40 outline-none focus:ring-1 focus:ring-purple-500"
+        />
+        <button type="submit" className="bg-pink-600 hover:bg-pink-700 p-3 rounded-xl transition-all text-xs font-bold px-4">Send</button>
+      </form>
+
+      <div className="w-full bg-black/30 rounded-2xl p-3 text-xs">
+        <p className="font-bold text-white/60 mb-2 border-b border-white/5 pb-1">👥 Room Participants ({participants.length})</p>
+        <div className="space-y-2 max-h-[120px] overflow-y-auto pr-1">
+          {participants.map((p) => (
+            <div key={p.id} className="flex justify-between items-center bg-white/5 p-2 rounded-xl">
+              <span className="font-medium">{p.name} {p.isOnMic && '🎙️'}</span>
+              
+              <div className="flex gap-1">
+                {!isVideoRoom && (
+                  <button 
+                    onClick={() => toggleParticipantMic(p.id)}
+                    className={`px-2 py-1 rounded text-[10px] font-bold ${p.isOnMic ? 'bg-green-600' : 'bg-white/10'}`}
+                  >
+                    {p.isOnMic ? 'On Stage' : 'Give Mic'}
+                  </button>
+                )}
+
+                {isHostOrAdmin && (
+                  <>
+                    <button 
+                      onClick={() => handleMuteUser(p.id)}
+                      className="px-2 py-1 rounded text-[10px] font-bold bg-yellow-600 hover:bg-yellow-700"
+                    >
+                      {p.isMuted ? 'Unmute' : 'Mute'}
+                    </button>
+                    <button 
+                      onClick={() => handleKickUser(p.id)}
+                      className="px-2 py-1 rounded text-[10px] font-bold bg-red-600 hover:bg-red-700"
+                    >
+                      Kick
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
